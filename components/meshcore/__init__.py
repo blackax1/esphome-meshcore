@@ -1,0 +1,257 @@
+"""ESPHome external component: MeshCore LoRa mesh hub.
+
+Owns the singleton MeshCore stack on the device and exposes it to other
+platforms (sensor, text_sensor) via a shared ID.
+
+The MeshCore library expects a pile of compile-time defines (P_LORA_*,
+LORA_FREQ, LORA_BW, LORA_SF, LORA_TX_POWER, ...) that its CustomSX1262
+helper reads. We translate the YAML config into those defines so we can
+reuse MeshCore's helpers verbatim instead of re-implementing radio init.
+"""
+
+from pathlib import Path
+
+import esphome.codegen as cg
+import esphome.config_validation as cv
+from esphome import automation, pins
+from esphome.core import CORE
+from esphome.const import (
+    CONF_CS_PIN,
+    CONF_FREQUENCY,
+    CONF_ID,
+    CONF_MISO_PIN,
+    CONF_MOSI_PIN,
+    CONF_RESET_PIN,
+    CONF_TEXT,
+)
+
+CODEOWNERS = ["@yourgithub"]
+# Note: we deliberately do NOT depend on the `spi` component. MeshCore's
+# CustomSX1262 helper drives the SPI bus itself via SPIClass.begin(sclk,
+# miso, mosi). Letting ESPHome's spi component own the bus and then handing
+# raw pin numbers to RadioLib leads to double-init and wedged transfers.
+DEPENDENCIES = []
+AUTO_LOAD = ["sensor", "text_sensor"]
+MULTI_CONF = False
+
+meshcore_ns = cg.esphome_ns.namespace("meshcore")
+MeshCoreComponent = meshcore_ns.class_("MeshCoreComponent", cg.Component)
+SendMessageAction = meshcore_ns.class_("SendMessageAction", automation.Action)
+
+CONF_RADIO = "radio"
+CONF_SCLK_PIN = "sclk_pin"
+CONF_DIO1_PIN = "dio1_pin"
+CONF_BUSY_PIN = "busy_pin"
+CONF_BANDWIDTH = "bandwidth"
+CONF_TCXO_VOLTAGE = "tcxo_voltage"
+CONF_DIO2_AS_RF_SWITCH = "dio2_as_rf_switch"
+CONF_RX_BOOSTED_GAIN = "rx_boosted_gain"
+CONF_SPREADING_FACTOR = "spreading_factor"
+CONF_CODING_RATE = "coding_rate"
+CONF_TX_POWER = "tx_power"
+CONF_NODE_NAME = "node_name"
+CONF_BATTERY_PIN = "battery_pin"
+CONF_CHANNELS = "channels"
+CONF_KEY = "key"
+CONF_PRIVATE_KEY = "private_key"
+
+
+def _validate_identity_hex(value):
+    """Hex string for a MeshCore Ed25519 private key.
+
+    Accepts either 64 bytes (just prv_key, pub_key derived on device) or
+    96 bytes (prv_key + pub_key concatenated, matching the on-device NVS
+    layout).
+    """
+    s = cv.string_strict(value).strip().lower()
+    if any(c not in "0123456789abcdef" for c in s):
+        raise cv.Invalid("identity.private_key must be a hex string")
+    if len(s) not in (128, 192):
+        raise cv.Invalid(
+            "identity.private_key must decode to 64 bytes "
+            "(128 hex chars, prv_key only) or 96 bytes "
+            f"(192 hex chars, prv_key + pub_key); got {len(s)} chars"
+        )
+    return s
+
+# Map YAML radio name -> the macro MeshCore's helpers gate on.
+RADIO_TYPES = {
+    "sx1262": "USE_SX1262",
+}
+
+
+CHANNEL_SCHEMA = cv.Schema(
+    {
+        cv.Required("name"): cv.string_strict,
+        # base64-encoded PSK; must decode to 16 or 32 bytes per the
+        # MeshCore wire format. We don't validate length here so the
+        # surface is small; the C++ side rejects invalid lengths at
+        # runtime with a logged warning.
+        cv.Required(CONF_KEY): cv.string_strict,
+    }
+)
+
+
+CONFIG_SCHEMA = cv.Schema(
+    {
+        cv.GenerateID(): cv.declare_id(MeshCoreComponent),
+        cv.Required(CONF_RADIO): cv.enum(RADIO_TYPES, lower=True),
+        cv.Required(CONF_SCLK_PIN): pins.internal_gpio_output_pin_number,
+        cv.Required(CONF_MISO_PIN): pins.internal_gpio_input_pin_number,
+        cv.Required(CONF_MOSI_PIN): pins.internal_gpio_output_pin_number,
+        cv.Required(CONF_CS_PIN): pins.internal_gpio_output_pin_number,
+        cv.Required(CONF_DIO1_PIN): pins.internal_gpio_input_pin_number,
+        cv.Required(CONF_RESET_PIN): pins.internal_gpio_output_pin_number,
+        cv.Required(CONF_BUSY_PIN): pins.internal_gpio_input_pin_number,
+        cv.Required(CONF_FREQUENCY): cv.float_range(min=137.0, max=1020.0),
+        cv.Optional(CONF_BANDWIDTH, default=250): cv.one_of(
+            7.8, 10.4, 15.6, 20.8, 31.25, 41.7, 62.5, 125, 250, 500, float=True
+        ),
+        cv.Optional(CONF_SPREADING_FACTOR, default=11): cv.int_range(min=5, max=12),
+        cv.Optional(CONF_CODING_RATE, default=5): cv.int_range(min=5, max=8),
+        cv.Optional(CONF_TX_POWER, default=17): cv.int_range(min=-9, max=22),
+        cv.Optional(CONF_TCXO_VOLTAGE, default=1.6): cv.float_range(min=0.0, max=3.3),
+        cv.Optional(CONF_DIO2_AS_RF_SWITCH, default=False): cv.boolean,
+        cv.Optional(CONF_RX_BOOSTED_GAIN, default=False): cv.boolean,
+        cv.Optional(CONF_NODE_NAME, default="esphome-mesh"): cv.string_strict,
+        cv.Optional(CONF_BATTERY_PIN): pins.internal_gpio_input_pin_number,
+        cv.Optional(CONF_PRIVATE_KEY): _validate_identity_hex,
+        cv.Optional(CONF_CHANNELS, default=[]): cv.ensure_list(CHANNEL_SCHEMA),
+    }
+).extend(cv.COMPONENT_SCHEMA)
+
+
+async def to_code(config):
+    var = cg.new_Pvariable(config[CONF_ID])
+    await cg.register_component(var, config)
+
+    cg.add(var.set_node_name(config[CONF_NODE_NAME]))
+
+    if (private_key := config.get(CONF_PRIVATE_KEY)) is not None:
+        cg.add(var.set_static_identity(private_key))
+
+    for channel in config[CONF_CHANNELS]:
+        cg.add(var.add_channel(channel["name"], channel[CONF_KEY]))
+
+    # Translate YAML config into the macros MeshCore's CustomSX1262::std_init
+    # and ESP32Board headers expect. Doing this at the build-flag level (vs.
+    # poking values in via setters) means the upstream helpers compile
+    # without modification.
+    flags = {
+        # Pin map used by CustomSX1262::std_init() and SPIClass::begin().
+        "P_LORA_SCLK": config[CONF_SCLK_PIN],
+        "P_LORA_MISO": config[CONF_MISO_PIN],
+        "P_LORA_MOSI": config[CONF_MOSI_PIN],
+        "P_LORA_NSS": config[CONF_CS_PIN],
+        "P_LORA_DIO_1": config[CONF_DIO1_PIN],
+        "P_LORA_RESET": config[CONF_RESET_PIN],
+        "P_LORA_BUSY": config[CONF_BUSY_PIN],
+        # Radio params consumed by std_init.
+        "LORA_FREQ": f"{config[CONF_FREQUENCY]:.4f}f",
+        "LORA_BW": f"{config[CONF_BANDWIDTH]:.2f}f",
+        "LORA_SF": config[CONF_SPREADING_FACTOR],
+        "LORA_CR": config[CONF_CODING_RATE],
+        "LORA_TX_POWER": config[CONF_TX_POWER],
+        "SX126X_DIO3_TCXO_VOLTAGE": f"{config[CONF_TCXO_VOLTAGE]:.2f}f",
+    }
+    if config[CONF_DIO2_AS_RF_SWITCH]:
+        flags["SX126X_DIO2_AS_RF_SWITCH"] = "true"
+    if config[CONF_RX_BOOSTED_GAIN]:
+        flags["SX126X_RX_BOOSTED_GAIN"] = "true"
+    if (battery_pin := config.get(CONF_BATTERY_PIN)) is not None:
+        flags["PIN_VBAT_READ"] = battery_pin
+
+    for name, value in flags.items():
+        cg.add_build_flag(f"-D{name}={value}")
+
+    # Variant gate (USE_SX1262, ...) consumed by MeshCore's CustomSX1262Wrapper.
+    cg.add_build_flag(f"-D{RADIO_TYPES[config[CONF_RADIO]]}=1")
+
+    # MeshCore reaches into RadioLib's private members (e.g. SX126x::mod,
+    # spreadingFactor, freqMHz). Upstream's platformio.ini sets these
+    # build flags; without them compilation of CustomSX1262Wrapper.h and
+    # SX126xReset.h fails with "private within this context" errors.
+    radiolib_flags = [
+        "RADIOLIB_GODMODE=1",
+        "RADIOLIB_STATIC_ONLY=1",
+        "RADIOLIB_EXCLUDE_CC1101=1",
+        "RADIOLIB_EXCLUDE_RF69=1",
+        "RADIOLIB_EXCLUDE_SX1231=1",
+        "RADIOLIB_EXCLUDE_SI443X=1",
+        "RADIOLIB_EXCLUDE_RFM2X=1",
+        "RADIOLIB_EXCLUDE_SX128X=1",
+        "RADIOLIB_EXCLUDE_AFSK=1",
+        "RADIOLIB_EXCLUDE_AX25=1",
+        "RADIOLIB_EXCLUDE_HELLSCHREIBER=1",
+        "RADIOLIB_EXCLUDE_MORSE=1",
+        "RADIOLIB_EXCLUDE_APRS=1",
+        "RADIOLIB_EXCLUDE_BELL=1",
+        "RADIOLIB_EXCLUDE_RTTY=1",
+        "RADIOLIB_EXCLUDE_SSTV=1",
+    ]
+    for flag in radiolib_flags:
+        cg.add_build_flag(f"-D{flag}")
+
+    # Pull MeshCore + transitive deps from PlatformIO. Listing them
+    # explicitly because PIO doesn't always honour MeshCore's
+    # library.json transitive deps when ESPHome's mixed
+    # arduino+espidf build is in play. Also pull arduino-esp32's FS
+    # bundled libraries so SimpleMeshTables.h's `#include <FS.h>`
+    # resolves; without this the espidf side of the build can't see
+    # the Arduino FS headers.
+    cg.add_platformio_option(
+        "lib_deps",
+        [
+            "https://github.com/meshcore-dev/MeshCore.git",
+            "jgromes/RadioLib@^7.6.0",
+            "rweather/Crypto@^0.4.0",
+            "adafruit/RTClib@^2.1.3",
+            "melopero/Melopero RV3028@^1.1.0",
+            "electroniccats/CayenneLPP@1.6.1",
+            "densaugeo/base64@^1.4.0",
+        ],
+    )
+    cg.add_platformio_option("lib_ldf_mode", "deep+")
+    # MeshCore's Identity.cpp #include's <ed_25519.h>, but the upstream
+    # library doesn't ship those C files in its src/. We vendor the
+    # reference orlp/ed25519 implementation under libs/ed25519 next to
+    # this component, structured as a proper PlatformIO library, and
+    # point lib_extra_dirs there so PIO discovers it automatically.
+    ed25519_lib_path = (
+        Path(__file__).resolve().parent.parent.parent / "libs"
+    )
+    cg.add_platformio_option("lib_extra_dirs", [str(ed25519_lib_path)])
+
+    # Re-enable the Arduino bundled libraries we need. Since ESPHome
+    # 2026.2 the ESP32 Arduino build disables all of them by default and
+    # external components must opt back in. None for the version means
+    # "use whatever the framework bundles".
+    # See https://developers.esphome.io/blog/2026/02/12/esp32-arduino-selective-compilation-libraries-disabled-by-default/
+    if CORE.is_esp32 and CORE.using_arduino:
+        # SPI for the LoRa radio bus, Wire for I2C peripherals MeshCore
+        # helpers may probe (RTC), Preferences for our identity NVS blob.
+        for arduino_lib in ("SPI", "Wire", "Preferences"):
+            cg.add_library(arduino_lib, None)
+
+
+# meshcore.send_message action.
+MESHCORE_SEND_MESSAGE_SCHEMA = cv.Schema(
+    {
+        cv.GenerateID(): cv.use_id(MeshCoreComponent),
+        cv.Required(CONF_TEXT): cv.templatable(cv.string_strict),
+    }
+)
+
+
+@automation.register_action(
+    "meshcore.send_message",
+    SendMessageAction,
+    MESHCORE_SEND_MESSAGE_SCHEMA,
+    synchronous=True,
+)
+async def send_message_action_to_code(config, action_id, template_arg, args):
+    parent = await cg.get_variable(config[CONF_ID])
+    var = cg.new_Pvariable(action_id, template_arg, parent)
+    text = await cg.templatable(config[CONF_TEXT], args, cg.std_string)
+    cg.add(var.set_text(text))
+    return var

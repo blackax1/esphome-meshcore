@@ -1,0 +1,78 @@
+# Minimal example wiring for a Heltec WiFi LoRa 32 V3 (ESP32-S3 + SX1262).
+# Adjust pins to match your board.
+
+esphome:
+  name: meshcore-node
+
+esp32:
+  board: heltec_wifi_lora_32_V3
+  framework:
+    type: arduino
+
+logger:
+api:
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+external_components:
+  - source:
+      type: local
+      path: components
+
+meshcore:
+  id: mesh_hub
+  radio: sx1262
+  sclk_pin: GPIO9
+  miso_pin: GPIO11
+  mosi_pin: GPIO10
+  cs_pin: GPIO8
+  dio1_pin: GPIO14
+  reset_pin: GPIO12
+  busy_pin: GPIO13
+  frequency: 869.525
+  bandwidth: 250
+  spreading_factor: 11
+  coding_rate: 5
+  tx_power: 22
+  tcxo_voltage: 1.6
+  dio2_as_rf_switch: true
+  rx_boosted_gain: true
+  node_name: "esphome-mesh-1"
+  # Optional: pin a deterministic identity across reflashes. 64 bytes of
+  # private key (128 hex chars) — pub_key is derived. Use !secret to keep
+  # it out of source control. Omit to let the device generate and cache
+  # a key in NVS on first boot.
+  # private_key: !secret meshcore_private_key
+  channels:
+    # 16-byte (128-bit) base64-encoded PSK shared by all participants.
+    # Generate with: openssl rand 16 | base64
+    - name: "public"
+      key: "AAECAwQFBgcICQoLDA0ODw=="
+
+text_sensor:
+  - platform: meshcore
+    meshcore_id: mesh_hub
+    last_message:
+      name: "Mesh Last Message"
+
+sensor:
+  - platform: meshcore
+    meshcore_id: mesh_hub
+    rssi:
+      name: "Mesh Last RSSI"
+    snr:
+      name: "Mesh Last SNR"
+    battery_voltage:
+      name: "Mesh Battery Voltage"
+
+button:
+  - platform: template
+    name: "Send mesh hello"
+    on_press:
+      - meshcore.send_message:
+          id: mesh_hub
+          text: "hello from esphome"

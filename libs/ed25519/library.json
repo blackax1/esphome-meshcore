@@ -1,0 +1,12 @@
+{
+  "name": "ed25519",
+  "version": "1.0.0",
+  "description": "Vendored copy of orlp/ed25519 (public domain) needed by MeshCore. Lives next to the meshcore ESPHome component because MeshCore expects ed_25519.h on its include path but doesn't ship the implementation in its own src/ dir.",
+  "frameworks": "*",
+  "platforms": "*",
+  "headers": "ed_25519.h",
+  "build": {
+    "libArchive": true,
+    "libLDFMode": "off"
+  }
+}

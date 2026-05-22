@@ -1,0 +1,17 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# ESPHome build artifacts
+.esphome/
+build/
+*.bin
+
+# Local secrets used for `esphome config`/`compile` validation
+secrets.yaml
+
+# Editor
+.vscode/
+.idea/
+*.swp
