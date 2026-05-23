@@ -233,6 +233,16 @@ async def to_code(config):
             "melopero/Melopero RV3028@^1.1.0",
             "electroniccats/CayenneLPP@1.6.1",
             "densaugeo/base64@^1.4.0",
+            # Force the bundled arduino-esp32 libs into PIO's lib graph
+            # *as well as* enabling them via cg.add_library below. PIO's
+            # strict library finder doesn't always cascade the
+            # NetworkInterface header from WiFi -> Network on its own,
+            # which trips the WiFi compile when external components are
+            # in play. Listing them here makes the resolution explicit
+            # and is a no-op when ESPHome's auto-resolution already
+            # pulled them in.
+            "Network",
+            "WiFi",
         ],
     )
     cg.add_platformio_option("lib_ldf_mode", "deep+")
@@ -256,13 +266,12 @@ async def to_code(config):
     for arduino_lib in ("SPI", "Wire", "Preferences"):
         cg.add_library(arduino_lib, None)
 
-    # Defensive: arduino-esp32 3.x split Network / NetworkInterface out
-    # of WiFi. ESPHome's wifi component is supposed to auto-resolve
-    # those, but in some versions the transitive doesn't stick when
-    # external components are also pulling in Arduino libs (we've seen
-    # this on a 2026.5 HA add-on). Adding them here is documented as
-    # a no-op when already enabled, so it's pure belt-and-suspenders.
-    for compat_lib in ("Network", "NetworkInterface"):
+    # Defensive: arduino-esp32 3.x split Network and NetworkInterface
+    # out of WiFi. ESPHome's wifi component is supposed to auto-resolve
+    # those, but in 2026.2-2026.5 we've seen the resolution miss when
+    # external components like ours are loading alongside wifi. Adding
+    # WiFi here too forces the chain through.
+    for compat_lib in ("WiFi", "Network", "NetworkInterface"):
         cg.add_library(compat_lib, None)
 
     # arduino-esp32 v3.x split Network and NetworkInterface out of the
