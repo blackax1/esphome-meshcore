@@ -256,6 +256,26 @@ async def to_code(config):
     for arduino_lib in ("SPI", "Wire", "Preferences"):
         cg.add_library(arduino_lib, None)
 
+    # Defensive: arduino-esp32 3.x split Network / NetworkInterface out
+    # of WiFi. ESPHome's wifi component is supposed to auto-resolve
+    # those, but in some versions the transitive doesn't stick when
+    # external components are also pulling in Arduino libs (we've seen
+    # this on a 2026.5 HA add-on). Adding them here is documented as
+    # a no-op when already enabled, so it's pure belt-and-suspenders.
+    for compat_lib in ("Network", "NetworkInterface"):
+        cg.add_library(compat_lib, None)
+
+    # arduino-esp32 v3.x split Network and NetworkInterface out of the
+    # WiFi library. ESPHome's wifi component is supposed to pull these
+    # transitively when add_library("WiFi") is called, but in practice
+    # some build environments (HA add-on, ESPHome dashboards from
+    # outside the YAML root) end up missing them and fail with
+    # 'Network.h: No such file or directory'. Adding them here is a
+    # no-op when they're already enabled and a real fix when they're
+    # not — meshcore boards almost always also use wifi.
+    for compat_lib in ("Network", "NetworkInterface"):
+        cg.add_library(compat_lib, None)
+
 
 # meshcore.send_message action.
 MESHCORE_SEND_MESSAGE_SCHEMA = cv.Schema(
