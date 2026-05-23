@@ -35,6 +35,11 @@ esphome-meshcore/
 
 ## Quick start
 
+> **Requires `framework: arduino`** on the ESP32. MeshCore and RadioLib
+> pull in `<SPI.h>`, `<Arduino.h>`, and friends that don't exist under
+> the esp-idf framework. The component will fail config validation with
+> a clear message if you try `framework: esp-idf`.
+
 1. Drop the repo into your ESPHome YAML:
 
    ```yaml

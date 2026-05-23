@@ -92,33 +92,57 @@ CHANNEL_SCHEMA = cv.Schema(
 )
 
 
-CONFIG_SCHEMA = cv.Schema(
-    {
-        cv.GenerateID(): cv.declare_id(MeshCoreComponent),
-        cv.Required(CONF_RADIO): cv.enum(RADIO_TYPES, lower=True),
-        cv.Required(CONF_SCLK_PIN): pins.internal_gpio_output_pin_number,
-        cv.Required(CONF_MISO_PIN): pins.internal_gpio_input_pin_number,
-        cv.Required(CONF_MOSI_PIN): pins.internal_gpio_output_pin_number,
-        cv.Required(CONF_CS_PIN): pins.internal_gpio_output_pin_number,
-        cv.Required(CONF_DIO1_PIN): pins.internal_gpio_input_pin_number,
-        cv.Required(CONF_RESET_PIN): pins.internal_gpio_output_pin_number,
-        cv.Required(CONF_BUSY_PIN): pins.internal_gpio_input_pin_number,
-        cv.Required(CONF_FREQUENCY): cv.float_range(min=137.0, max=1020.0),
-        cv.Optional(CONF_BANDWIDTH, default=250): cv.one_of(
-            7.8, 10.4, 15.6, 20.8, 31.25, 41.7, 62.5, 125, 250, 500, float=True
-        ),
-        cv.Optional(CONF_SPREADING_FACTOR, default=11): cv.int_range(min=5, max=12),
-        cv.Optional(CONF_CODING_RATE, default=5): cv.int_range(min=5, max=8),
-        cv.Optional(CONF_TX_POWER, default=17): cv.int_range(min=-9, max=22),
-        cv.Optional(CONF_TCXO_VOLTAGE, default=1.6): cv.float_range(min=0.0, max=3.3),
-        cv.Optional(CONF_DIO2_AS_RF_SWITCH, default=False): cv.boolean,
-        cv.Optional(CONF_RX_BOOSTED_GAIN, default=False): cv.boolean,
-        cv.Optional(CONF_NODE_NAME, default="esphome-mesh"): cv.string_strict,
-        cv.Optional(CONF_BATTERY_PIN): pins.internal_gpio_input_pin_number,
-        cv.Optional(CONF_PRIVATE_KEY): _validate_identity_hex,
-        cv.Optional(CONF_CHANNELS, default=[]): cv.ensure_list(CHANNEL_SCHEMA),
-    }
-).extend(cv.COMPONENT_SCHEMA)
+def _validate_framework(value):
+    """Reject non-Arduino frameworks at config time with a clear message.
+
+    Has to live as a top-level validator (run after CORE.using_arduino is
+    populated) rather than in to_code, because to_code only runs during
+    `esphome compile`, not `esphome config`.
+    """
+    if not (CORE.is_esp32 and CORE.using_arduino):
+        raise cv.Invalid(
+            "meshcore requires the Arduino framework on ESP32. Add this "
+            "to your YAML:\n\n"
+            "  esp32:\n"
+            "    framework:\n"
+            "      type: arduino\n\n"
+            "MeshCore and RadioLib pull in <SPI.h>, <Arduino.h>, "
+            "digitalRead/Write, and attachInterrupt, which are not "
+            "available under the esp-idf framework."
+        )
+    return value
+
+
+CONFIG_SCHEMA = cv.All(
+    cv.Schema(
+        {
+            cv.GenerateID(): cv.declare_id(MeshCoreComponent),
+            cv.Required(CONF_RADIO): cv.enum(RADIO_TYPES, lower=True),
+            cv.Required(CONF_SCLK_PIN): pins.internal_gpio_output_pin_number,
+            cv.Required(CONF_MISO_PIN): pins.internal_gpio_input_pin_number,
+            cv.Required(CONF_MOSI_PIN): pins.internal_gpio_output_pin_number,
+            cv.Required(CONF_CS_PIN): pins.internal_gpio_output_pin_number,
+            cv.Required(CONF_DIO1_PIN): pins.internal_gpio_input_pin_number,
+            cv.Required(CONF_RESET_PIN): pins.internal_gpio_output_pin_number,
+            cv.Required(CONF_BUSY_PIN): pins.internal_gpio_input_pin_number,
+            cv.Required(CONF_FREQUENCY): cv.float_range(min=137.0, max=1020.0),
+            cv.Optional(CONF_BANDWIDTH, default=250): cv.one_of(
+                7.8, 10.4, 15.6, 20.8, 31.25, 41.7, 62.5, 125, 250, 500, float=True
+            ),
+            cv.Optional(CONF_SPREADING_FACTOR, default=11): cv.int_range(min=5, max=12),
+            cv.Optional(CONF_CODING_RATE, default=5): cv.int_range(min=5, max=8),
+            cv.Optional(CONF_TX_POWER, default=17): cv.int_range(min=-9, max=22),
+            cv.Optional(CONF_TCXO_VOLTAGE, default=1.6): cv.float_range(min=0.0, max=3.3),
+            cv.Optional(CONF_DIO2_AS_RF_SWITCH, default=False): cv.boolean,
+            cv.Optional(CONF_RX_BOOSTED_GAIN, default=False): cv.boolean,
+            cv.Optional(CONF_NODE_NAME, default="esphome-mesh"): cv.string_strict,
+            cv.Optional(CONF_BATTERY_PIN): pins.internal_gpio_input_pin_number,
+            cv.Optional(CONF_PRIVATE_KEY): _validate_identity_hex,
+            cv.Optional(CONF_CHANNELS, default=[]): cv.ensure_list(CHANNEL_SCHEMA),
+        }
+    ).extend(cv.COMPONENT_SCHEMA),
+    _validate_framework,
+)
 
 
 async def to_code(config):
@@ -227,11 +251,10 @@ async def to_code(config):
     # external components must opt back in. None for the version means
     # "use whatever the framework bundles".
     # See https://developers.esphome.io/blog/2026/02/12/esp32-arduino-selective-compilation-libraries-disabled-by-default/
-    if CORE.is_esp32 and CORE.using_arduino:
-        # SPI for the LoRa radio bus, Wire for I2C peripherals MeshCore
-        # helpers may probe (RTC), Preferences for our identity NVS blob.
-        for arduino_lib in ("SPI", "Wire", "Preferences"):
-            cg.add_library(arduino_lib, None)
+    # SPI for the LoRa radio bus, Wire for I2C peripherals MeshCore
+    # helpers may probe (RTC), Preferences for our identity NVS blob.
+    for arduino_lib in ("SPI", "Wire", "Preferences"):
+        cg.add_library(arduino_lib, None)
 
 
 # meshcore.send_message action.
