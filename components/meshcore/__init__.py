@@ -233,16 +233,6 @@ async def to_code(config):
             "melopero/Melopero RV3028@^1.1.0",
             "electroniccats/CayenneLPP@1.6.1",
             "densaugeo/base64@^1.4.0",
-            # Force the bundled arduino-esp32 libs into PIO's lib graph
-            # *as well as* enabling them via cg.add_library below. PIO's
-            # strict library finder doesn't always cascade the
-            # NetworkInterface header from WiFi -> Network on its own,
-            # which trips the WiFi compile when external components are
-            # in play. Listing them here makes the resolution explicit
-            # and is a no-op when ESPHome's auto-resolution already
-            # pulled them in.
-            "Network",
-            "WiFi",
         ],
     )
     cg.add_platformio_option("lib_ldf_mode", "deep+")
@@ -263,27 +253,21 @@ async def to_code(config):
     # See https://developers.esphome.io/blog/2026/02/12/esp32-arduino-selective-compilation-libraries-disabled-by-default/
     # SPI for the LoRa radio bus, Wire for I2C peripherals MeshCore
     # helpers may probe (RTC), Preferences for our identity NVS blob.
+    # WiFi is only required when the user's YAML uses wifi: with our
+    # component active in the same build — adding it unconditionally
+    # is harmless because cg.add_library is idempotent and the wifi
+    # component already calls add_library("WiFi") itself anyway.
     for arduino_lib in ("SPI", "Wire", "Preferences"):
         cg.add_library(arduino_lib, None)
 
-    # Defensive: arduino-esp32 3.x split Network and NetworkInterface
-    # out of WiFi. ESPHome's wifi component is supposed to auto-resolve
-    # those, but in 2026.2-2026.5 we've seen the resolution miss when
-    # external components like ours are loading alongside wifi. Adding
-    # WiFi here too forces the chain through.
-    for compat_lib in ("WiFi", "Network", "NetworkInterface"):
-        cg.add_library(compat_lib, None)
-
-    # arduino-esp32 v3.x split Network and NetworkInterface out of the
-    # WiFi library. ESPHome's wifi component is supposed to pull these
-    # transitively when add_library("WiFi") is called, but in practice
-    # some build environments (HA add-on, ESPHome dashboards from
-    # outside the YAML root) end up missing them and fail with
-    # 'Network.h: No such file or directory'. Adding them here is a
-    # no-op when they're already enabled and a real fix when they're
-    # not — meshcore boards almost always also use wifi.
-    for compat_lib in ("Network", "NetworkInterface"):
-        cg.add_library(compat_lib, None)
+    # Defensive: arduino-esp32 3.x split Network out of WiFi. ESPHome's
+    # wifi component should auto-resolve Network when it calls
+    # add_library("WiFi"), but we've seen it miss in some 2026.x
+    # releases. Calling add_library("Network") explicitly here forces
+    # CONFIG_ARDUINO_SELECTIVE_Network=y in the generated sdkconfig,
+    # which makes the bundled library actually compile. It's a no-op
+    # if the wifi component already enabled it.
+    cg.add_library("Network", None)
 
 
 # meshcore.send_message action.
