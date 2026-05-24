@@ -125,24 +125,40 @@ void MeshCoreComponent::add_channel(const std::string &name, const std::string &
   this->pending_channels_.push_back({name, psk_base64});
 }
 
-bool MeshCoreComponent::send_message(const std::string &text) {
-  if (!this->ready_) {
-    ESP_LOGW(TAG, "send_message dropped: mesh not ready");
-    return false;
-  }
+bool MeshCoreComponent::send_text_message(const std::string &text) {
   if (this->channels_.empty()) {
-    ESP_LOGW(TAG, "send_message dropped: no channels configured");
+    ESP_LOGW(TAG, "send_text_message dropped: no channels configured");
     return false;
   }
+  return this->send_text_message(this->channels_.front().name, text);
+}
+
+bool MeshCoreComponent::send_text_message(const std::string &channel_name, const std::string &text) {
+  if (!this->ready_) {
+    ESP_LOGW(TAG, "send_text_message dropped: mesh not ready");
+    return false;
+  }
+  // Locate the configured channel by name.
+  const ChannelDetails *channel = nullptr;
+  for (const auto &ch : this->channels_) {
+    if (channel_name == ch.name) {
+      channel = &ch;
+      break;
+    }
+  }
+  if (channel == nullptr) {
+    ESP_LOGW(TAG, "send_text_message: channel '%s' not configured", channel_name.c_str());
+    return false;
+  }
+
   if (text.size() > MESHCORE_MAX_TEXT_LEN) {
-    ESP_LOGW(TAG, "send_message: trimming '%s' to %u bytes", text.c_str(),
+    ESP_LOGW(TAG, "send_text_message: trimming '%s' to %u bytes", text.c_str(),
              (unsigned) MESHCORE_MAX_TEXT_LEN);
   }
 
   // Wire format expected by other MeshCore nodes on PAYLOAD_TYPE_GRP_TXT:
   //   [timestamp(4) | txt_type(1) | "<sender>: <msg>\0"]
   // See BaseChatMesh::sendGroupMessage in the upstream library.
-  const auto &channel = this->channels_.front().channel;
   const std::string sender = this->node_name_;
   const size_t prefix_len = sender.size() + 2;  // "name: "
   const size_t text_len = std::min(text.size(), MESHCORE_MAX_TEXT_LEN - prefix_len);
@@ -152,19 +168,18 @@ bool MeshCoreComponent::send_message(const std::string &text) {
   const uint32_t ts = this->rtc_clock_.getCurrentTime();
   memcpy(buf, &ts, 4);
   buf[4] = TXT_TYPE_PLAIN;
-  // sender + ": " + text + NUL
   memcpy(&buf[5], sender.data(), sender.size());
   buf[5 + sender.size()] = ':';
   buf[5 + sender.size() + 1] = ' ';
   memcpy(&buf[5 + prefix_len], text.data(), text_len);
 
-  mesh::Packet *pkt = this->mesh_->createGroupDatagram(PAYLOAD_TYPE_GRP_TXT, channel, buf, total);
+  mesh::Packet *pkt = this->mesh_->createGroupDatagram(PAYLOAD_TYPE_GRP_TXT, channel->channel, buf, total);
   if (pkt == nullptr) {
-    ESP_LOGW(TAG, "send_message: packet allocation failed");
+    ESP_LOGW(TAG, "send_text_message: packet allocation failed");
     return false;
   }
   this->mesh_->sendFlood(pkt);
-  ESP_LOGD(TAG, "send_message flooded on '%s': %s", this->channels_.front().name, text.c_str());
+  ESP_LOGD(TAG, "send_text_message flooded on '%s': %s", channel->name, text.c_str());
   return true;
 }
 

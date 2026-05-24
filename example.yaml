@@ -73,6 +73,7 @@ button:
   - platform: template
     name: "Send mesh hello"
     on_press:
-      - meshcore.send_message:
+      - meshcore.send_text_message:
           id: mesh_hub
+          channel: "public"
           text: "hello from esphome"

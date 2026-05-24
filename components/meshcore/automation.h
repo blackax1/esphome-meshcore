@@ -6,15 +6,26 @@
 namespace esphome {
 namespace meshcore {
 
-template<typename... Ts> class SendMessageAction : public Action<Ts...> {
+/// Send a UTF-8 text message on a configured group channel.
+///
+/// `channel` is optional; when omitted the message goes out on the first
+/// configured channel (matches the prior `meshcore.send_message`
+/// behaviour). `text` is mandatory and templatable.
+template<typename... Ts> class SendTextMessageAction : public Action<Ts...> {
  public:
-  explicit SendMessageAction(MeshCoreComponent *parent) : parent_(parent) {}
+  explicit SendTextMessageAction(MeshCoreComponent *parent) : parent_(parent) {}
 
   TEMPLATABLE_VALUE(std::string, text)
+  TEMPLATABLE_VALUE(std::string, channel)
 
   void play(Ts... x) override {
-    auto text = this->text_.value(x...);
-    this->parent_->send_message(text);
+    const auto text = this->text_.value(x...);
+    const auto channel = this->channel_.value(x...);
+    if (channel.empty()) {
+      this->parent_->send_text_message(text);
+    } else {
+      this->parent_->send_text_message(channel, text);
+    }
   }
 
  protected:

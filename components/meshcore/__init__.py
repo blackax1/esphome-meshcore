@@ -36,7 +36,7 @@ MULTI_CONF = False
 
 meshcore_ns = cg.esphome_ns.namespace("meshcore")
 MeshCoreComponent = meshcore_ns.class_("MeshCoreComponent", cg.Component)
-SendMessageAction = meshcore_ns.class_("SendMessageAction", automation.Action)
+SendTextMessageAction = meshcore_ns.class_("SendTextMessageAction", automation.Action)
 
 CONF_RADIO = "radio"
 CONF_SCLK_PIN = "sclk_pin"
@@ -52,6 +52,7 @@ CONF_TX_POWER = "tx_power"
 CONF_NODE_NAME = "node_name"
 CONF_BATTERY_PIN = "battery_pin"
 CONF_CHANNELS = "channels"
+CONF_CHANNEL = "channel"
 CONF_KEY = "key"
 CONF_PRIVATE_KEY = "private_key"
 
@@ -270,24 +271,44 @@ async def to_code(config):
     cg.add_library("Network", None)
 
 
-# meshcore.send_message action.
-MESHCORE_SEND_MESSAGE_SCHEMA = cv.Schema(
+# meshcore.send_text_message action.
+#
+# `text` is required and templatable. `channel` is optional; when omitted
+# the message goes out on the first configured channel. We keep the old
+# `meshcore.send_message` name registered as an alias for back-compat so
+# YAML written against earlier revisions of this component still parses.
+MESHCORE_SEND_TEXT_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.use_id(MeshCoreComponent),
         cv.Required(CONF_TEXT): cv.templatable(cv.string_strict),
+        cv.Optional(CONF_CHANNEL, default=""): cv.templatable(cv.string_strict),
     }
 )
 
 
-@automation.register_action(
-    "meshcore.send_message",
-    SendMessageAction,
-    MESHCORE_SEND_MESSAGE_SCHEMA,
-    synchronous=True,
-)
-async def send_message_action_to_code(config, action_id, template_arg, args):
+async def _send_text_action_to_code(config, action_id, template_arg, args):
     parent = await cg.get_variable(config[CONF_ID])
     var = cg.new_Pvariable(action_id, template_arg, parent)
     text = await cg.templatable(config[CONF_TEXT], args, cg.std_string)
     cg.add(var.set_text(text))
+    channel = await cg.templatable(config[CONF_CHANNEL], args, cg.std_string)
+    cg.add(var.set_channel(channel))
     return var
+
+
+# New canonical name.
+automation.register_action(
+    "meshcore.send_text_message",
+    SendTextMessageAction,
+    MESHCORE_SEND_TEXT_SCHEMA,
+    synchronous=True,
+)(_send_text_action_to_code)
+
+# Legacy alias kept for back-compat. Deprecated; will be removed in a
+# future release.
+automation.register_action(
+    "meshcore.send_message",
+    SendTextMessageAction,
+    MESHCORE_SEND_TEXT_SCHEMA,
+    synchronous=True,
+)(_send_text_action_to_code)

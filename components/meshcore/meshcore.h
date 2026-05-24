@@ -110,7 +110,12 @@ class MeshCoreComponent : public Component {
 
   /// Send `text` on the first configured channel. Returns false if the
   /// mesh isn't ready or no channels are configured.
-  bool send_message(const std::string &text);
+  bool send_text_message(const std::string &text);
+
+  /// Send `text` on the channel matching `channel_name`. Returns false
+  /// if the mesh isn't ready, the channel name is not in the configured
+  /// list, or the underlying flood fails.
+  bool send_text_message(const std::string &channel_name, const std::string &text);
 
   // Called from EsphomeMesh callbacks.
   void on_message_received(const std::string &payload, float rssi, float snr);
