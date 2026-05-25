@@ -21,6 +21,18 @@ static constexpr int PACKET_POOL_SIZE = 16;
 // pull in all of BaseChatMesh.h just for one constant.
 static constexpr size_t MESHCORE_MAX_TEXT_LEN = 10 * CIPHER_BLOCK_SIZE;
 
+// "Real world" floor for accepting mesh-learned timestamps: 2024-01-01
+// 00:00:00 UTC. Stops a misbehaving / freshly-booted peer from
+// fast-forwarding our clock to junk values. MeshCore's own RTC bootstrap
+// uses 2024-05-15 (1715770351); we go a few months earlier so our
+// floor always trails the upstream baseline by a comfortable margin.
+static constexpr uint32_t MESH_TIME_FLOOR = 1704067200U;
+
+// Minimum delta in seconds between the incoming timestamp and the
+// current RTC before we bother bumping. Keeps small jitter from
+// constantly re-writing NVS as adverts arrive.
+static constexpr uint32_t MIN_MESH_TIME_BUMP_SEC = 60;
+
 // ---- MeshCoreComponent ----
 
 void MeshCoreComponent::setup() {
@@ -55,6 +67,18 @@ void MeshCoreComponent::setup() {
     ESP_LOGE(TAG, "Identity setup failed; mesh stack will stay disabled");
     this->mark_failed();
     return;
+  }
+
+  // Restore any previously mesh-learned timestamp from NVS so we don't
+  // start from MeshCore's 2024 baseline on every boot. Cheap, fixed
+  // 32-bit blob keyed off the node name (so two nodes flashed onto the
+  // same board don't share state).
+  this->mesh_time_pref_ = global_preferences->make_preference<uint32_t>(
+      fnv1_hash(std::string("meshcore.mesh_time.") + this->node_name_));
+  uint32_t saved_ts = 0;
+  if (this->mesh_time_pref_.load(&saved_ts) && saved_ts >= MESH_TIME_FLOOR) {
+    this->rtc_clock_.setCurrentTime(saved_ts);
+    ESP_LOGCONFIG(TAG, "RTC restored from NVS: %u", (unsigned) saved_ts);
   }
 
   // Decode any channels declared in YAML now that hashing helpers are
@@ -118,6 +142,11 @@ void MeshCoreComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "  Channels configured: %u", (unsigned) this->channels_.size());
   ESP_LOGCONFIG(TAG, "  Identity source: %s",
                 this->static_identity_hex_.empty() ? "NVS (auto)" : "YAML private_key");
+  ESP_LOGCONFIG(TAG, "  RTC time: %u (%s)",
+                (unsigned) this->rtc_clock_.getCurrentTime(),
+                this->rtc_clock_.getCurrentTime() >= MESH_TIME_FLOOR
+                    ? "synced from mesh"
+                    : "baseline (waiting for advert)");
   ESP_LOGCONFIG(TAG, "  Mesh ready: %s", YESNO(this->ready_));
 }
 
@@ -205,6 +234,26 @@ void MeshCoreComponent::on_battery_sample_() {
   this->sensors_->publish_battery_voltage(mv / 1000.0f);
 }
 
+void MeshCoreComponent::bump_rtc_from_mesh(uint32_t mesh_timestamp) {
+  if (mesh_timestamp < MESH_TIME_FLOOR) {
+    return;  // not plausible "real world" time, ignore
+  }
+  const uint32_t now = this->rtc_clock_.getCurrentTime();
+  if (mesh_timestamp <= now + MIN_MESH_TIME_BUMP_SEC) {
+    return;  // already current enough
+  }
+  this->rtc_clock_.setCurrentTime(mesh_timestamp);
+  ESP_LOGD(TAG, "rtc bumped from mesh: %u -> %u (+%u s)",
+           (unsigned) now, (unsigned) mesh_timestamp,
+           (unsigned) (mesh_timestamp - now));
+
+  // Persist to NVS so we don't fall back to the hard-coded baseline on
+  // the next boot. Cheap because the >60s guard keeps writes rare.
+  uint32_t blob = mesh_timestamp;
+  this->mesh_time_pref_.save(&blob);
+  global_preferences->sync();
+}
+
 bool MeshCoreComponent::load_or_create_identity_() {
   // 1. YAML-supplied static identity beats everything else. Lets the
   //    operator pin a node's pubkey across reflashes (handy for
@@ -257,6 +306,10 @@ void EsphomeMesh::onAdvertRecv(mesh::Packet *packet, const mesh::Identity &id, u
   std::string label(reinterpret_cast<const char *>(app_data), app_data_len);
   ESP_LOGD(TAG, "advert from %02x%02x%02x%02x: '%s'",
            id.pub_key[0], id.pub_key[1], id.pub_key[2], id.pub_key[3], label.c_str());
+  // Bootstrap our RTC off whichever advert in the mesh has the newest
+  // timestamp. Off-grid nodes converge their clock this way without
+  // needing WiFi / NTP / GPS.
+  this->owner_->bump_rtc_from_mesh(timestamp);
 }
 
 void EsphomeMesh::onAnonDataRecv(mesh::Packet *packet, const uint8_t *secret,
@@ -291,6 +344,10 @@ void EsphomeMesh::onGroupDataRecv(mesh::Packet *packet, uint8_t type,
   }
   // Wire format: [timestamp(4) | txt_type(1) | "sender: text\0"]
   // We just hand the human-readable part straight to the text sensor.
+  uint32_t sender_ts;
+  memcpy(&sender_ts, data, 4);
+  this->owner_->bump_rtc_from_mesh(sender_ts);
+
   const char *text = reinterpret_cast<const char *>(&data[5]);
   std::string payload(text, strnlen(text, len - 5));
   const float rssi = this->_radio->getLastRSSI();

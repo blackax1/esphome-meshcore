@@ -117,7 +117,13 @@ class MeshCoreComponent : public Component {
   /// list, or the underlying flood fails.
   bool send_text_message(const std::string &channel_name, const std::string &text);
 
-  // Called from EsphomeMesh callbacks.
+  /// Adopt `mesh_timestamp` (UNIX epoch seconds, from a received packet)
+  /// as our local RTC if it looks more accurate than what we have. The
+  /// guard is two-sided: we only accept timestamps that are (a) past
+  /// our hard "real world" floor of 1 Jan 2024, and (b) at least
+  /// MIN_MESH_TIME_BUMP_SEC newer than the current local time, which
+  /// keeps small jitter from constantly re-writing NVS.
+  void bump_rtc_from_mesh(uint32_t mesh_timestamp);
   void on_message_received(const std::string &payload, float rssi, float snr);
   const std::vector<ChannelDetails> &channels() const { return this->channels_; }
 
@@ -160,6 +166,10 @@ class MeshCoreComponent : public Component {
 
   // Preference handle for the persisted identity blob (prv_key + pub_key).
   ESPPreferenceObject identity_pref_;
+  // Preference handle for the highest mesh-learned timestamp we've
+  // adopted into our RTC. Persisted so the next boot doesn't fall back
+  // to MeshCore's hard-coded May 2024 baseline.
+  ESPPreferenceObject mesh_time_pref_;
 };
 
 }  // namespace meshcore
