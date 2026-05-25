@@ -33,9 +33,9 @@ meshcore:
   dio1_pin: GPIO14
   reset_pin: GPIO12
   busy_pin: GPIO13
-  frequency: 869.525
-  bandwidth: 250
-  spreading_factor: 11
+  frequency: 869.618
+  bandwidth: 62.5
+  spreading_factor: 8
   coding_rate: 5
   tx_power: 22
   tcxo_voltage: 1.6
@@ -48,10 +48,15 @@ meshcore:
   # a key in NVS on first boot.
   # private_key: !secret meshcore_private_key
   channels:
-    # 16-byte (128-bit) base64-encoded PSK shared by all participants.
-    # Generate with: openssl rand 16 | base64
-    - name: "public"
-      key: "AAECAwQFBgcICQoLDA0ODw=="
+    # The upstream MeshCore "Public" channel PSK. All MeshCore companion
+    # apps pre-load this exact key under the name "Public", so a node
+    # configured this way is interoperable with the public mesh out of
+    # the box. For a private channel, generate your own key with:
+    #   openssl rand 16 | base64
+    # and share it (over a secure channel) with everyone you want to
+    # talk to.
+    - name: "Public"
+      key: "izOH6cXN6mrJ5e26oRXNcg=="
 
 text_sensor:
   - platform: meshcore
@@ -75,5 +80,5 @@ button:
     on_press:
       - meshcore.send_text_message:
           id: mesh_hub
-          channel: "public"
+          channel: "Public"
           text: "hello from esphome"

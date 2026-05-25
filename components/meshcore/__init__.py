@@ -126,11 +126,17 @@ CONFIG_SCHEMA = cv.All(
             cv.Required(CONF_DIO1_PIN): pins.internal_gpio_input_pin_number,
             cv.Required(CONF_RESET_PIN): pins.internal_gpio_output_pin_number,
             cv.Required(CONF_BUSY_PIN): pins.internal_gpio_input_pin_number,
-            cv.Required(CONF_FREQUENCY): cv.float_range(min=137.0, max=1020.0),
-            cv.Optional(CONF_BANDWIDTH, default=250): cv.one_of(
+            # Defaults match upstream MeshCore's platformio.ini, so a
+            # node configured with just radio + pins talks on the
+            # public mesh out of the box. Override frequency for
+            # non-EU868 regions (US/AU/etc).
+            cv.Optional(CONF_FREQUENCY, default=869.618): cv.float_range(
+                min=137.0, max=1020.0
+            ),
+            cv.Optional(CONF_BANDWIDTH, default=62.5): cv.one_of(
                 7.8, 10.4, 15.6, 20.8, 31.25, 41.7, 62.5, 125, 250, 500, float=True
             ),
-            cv.Optional(CONF_SPREADING_FACTOR, default=11): cv.int_range(min=5, max=12),
+            cv.Optional(CONF_SPREADING_FACTOR, default=8): cv.int_range(min=5, max=12),
             cv.Optional(CONF_CODING_RATE, default=5): cv.int_range(min=5, max=8),
             cv.Optional(CONF_TX_POWER, default=17): cv.int_range(min=-9, max=22),
             cv.Optional(CONF_TCXO_VOLTAGE, default=1.6): cv.float_range(min=0.0, max=3.3),

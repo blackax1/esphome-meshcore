@@ -63,19 +63,20 @@ esphome-meshcore/
      dio1_pin: GPIO14
      reset_pin: GPIO12
      busy_pin: GPIO13
-     frequency: 869.525  # MHz, region-appropriate
-     bandwidth: 250      # kHz
-     spreading_factor: 11
+     frequency: 869.618  # MHz; default matches upstream MeshCore. Override for US/AU.
+     bandwidth: 62.5     # kHz; matches upstream default
+     spreading_factor: 8 # matches upstream default
      coding_rate: 5
      tx_power: 22        # dBm
      tcxo_voltage: 1.6
      dio2_as_rf_switch: true
      rx_boosted_gain: true
      channels:
-       # 16-byte (128-bit) base64 PSK shared by all participants.
-       # Generate with: openssl rand 16 | base64
-       - name: "public"
-         key: "AAECAwQFBgcICQoLDA0ODw=="
+       # Upstream MeshCore "Public" channel PSK. Use a different name +
+       # base64 key for a private channel. Generate one with:
+       #   openssl rand 16 | base64
+       - name: "Public"
+         key: "izOH6cXN6mrJ5e26oRXNcg=="
 
    text_sensor:
      - platform: meshcore
