@@ -57,6 +57,46 @@ CONF_KEY = "key"
 CONF_PRIVATE_KEY = "private_key"
 
 
+def _validate_channel_key(value):
+    """Validate a channel PSK and normalise to base64.
+
+    Accepts:
+    * base64 string that decodes to 16 or 32 bytes (with or without
+      trailing ``=`` padding).
+    * hex string of 32 or 64 chars (16 or 32 bytes).
+
+    Returns the canonical base64 representation that the C++ side will
+    decode at runtime. Raises cv.Invalid with a message that points the
+    user at the right format when the input doesn't match either form.
+    """
+    import base64
+    import binascii
+
+    s = cv.string_strict(value).strip()
+    stripped = s.lower()
+
+    # Hex first: it's an unambiguous superset (no '+', '/', '=' etc).
+    if all(c in "0123456789abcdef" for c in stripped) and len(stripped) in (32, 64):
+        raw = binascii.unhexlify(stripped)
+        return base64.b64encode(raw).decode("ascii")
+
+    # Otherwise try base64. Pad if needed so outputs from
+    # "openssl rand 16 | base64" with no trailing newlines still parse.
+    padded = s + "=" * (-len(s) % 4)
+    try:
+        raw = base64.b64decode(padded, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise cv.Invalid(
+            f"channel key {s!r} is not valid base64 or hex: {exc}"
+        ) from exc
+    if len(raw) not in (16, 32):
+        raise cv.Invalid(
+            f"channel key must decode to 16 or 32 bytes (128- or 256-bit "
+            f"PSK); got {len(raw)} bytes from {s!r}"
+        )
+    return base64.b64encode(raw).decode("ascii")
+
+
 def _validate_identity_hex(value):
     """Hex string for a MeshCore Ed25519 private key.
 
@@ -84,11 +124,12 @@ RADIO_TYPES = {
 CHANNEL_SCHEMA = cv.Schema(
     {
         cv.Required("name"): cv.string_strict,
-        # base64-encoded PSK; must decode to 16 or 32 bytes per the
-        # MeshCore wire format. We don't validate length here so the
-        # surface is small; the C++ side rejects invalid lengths at
-        # runtime with a logged warning.
-        cv.Required(CONF_KEY): cv.string_strict,
+        # Channel PSK. Accept either base64 (matching upstream MeshCore
+        # tools, e.g. izOH6cXN6mrJ5e26oRXNcg==) or raw hex (matching
+        # `openssl rand -hex 16`). Either form must decode to 16 or 32
+        # bytes. Hex inputs are normalised to base64 here so the C++
+        # side can stay base64-only.
+        cv.Required(CONF_KEY): _validate_channel_key,
     }
 )
 
