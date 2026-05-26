@@ -18,8 +18,18 @@
 #include <helpers/SimpleMeshTables.h>
 #include <helpers/StaticPoolPacketManager.h>
 #include <helpers/TxtDataHelpers.h>
+
+// Radio variant selection. Exactly one of USE_SX1262 / USE_SX1276 is
+// defined by the Python side based on `radio:`.
+#if defined(USE_SX1262)
 #include <helpers/radiolib/CustomSX1262.h>
 #include <helpers/radiolib/CustomSX1262Wrapper.h>
+#elif defined(USE_SX1276)
+#include <helpers/radiolib/CustomSX1276.h>
+#include <helpers/radiolib/CustomSX1276Wrapper.h>
+#else
+#error "meshcore: no radio variant selected (USE_SX1262 / USE_SX1276 must be defined)"
+#endif
 
 #include "esphome/core/preferences.h"
 
@@ -156,8 +166,18 @@ class MeshCoreComponent : public Component {
   StdRNG rng_;
   SimpleMeshTables tables_;
 
-  std::unique_ptr<CustomSX1262> radio_;
-  std::unique_ptr<CustomSX1262Wrapper> radio_wrapper_;
+  // Concrete radio type chosen at compile time from the YAML radio:
+  // selector. RadioLibWrapper is the common base both wrappers share.
+#if defined(USE_SX1262)
+  using ConcreteRadio = CustomSX1262;
+  using ConcreteRadioWrapper = CustomSX1262Wrapper;
+#elif defined(USE_SX1276)
+  using ConcreteRadio = CustomSX1276;
+  using ConcreteRadioWrapper = CustomSX1276Wrapper;
+#endif
+
+  std::unique_ptr<ConcreteRadio> radio_;
+  std::unique_ptr<ConcreteRadioWrapper> radio_wrapper_;
   std::unique_ptr<StaticPoolPacketManager> packet_mgr_;
   std::unique_ptr<EsphomeMesh> mesh_;
 

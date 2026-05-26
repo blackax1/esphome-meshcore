@@ -40,6 +40,7 @@ SendTextMessageAction = meshcore_ns.class_("SendTextMessageAction", automation.A
 
 CONF_RADIO = "radio"
 CONF_SCLK_PIN = "sclk_pin"
+CONF_DIO0_PIN = "dio0_pin"
 CONF_DIO1_PIN = "dio1_pin"
 CONF_BUSY_PIN = "busy_pin"
 CONF_BANDWIDTH = "bandwidth"
@@ -118,7 +119,16 @@ def _validate_identity_hex(value):
 # Map YAML radio name -> the macro MeshCore's helpers gate on.
 RADIO_TYPES = {
     "sx1262": "USE_SX1262",
+    "sx1276": "USE_SX1276",
+    "sx1278": "USE_SX1276",  # 1278 is a re-banded 1276; same driver
 }
+
+# Radios in the SX126x family use a BUSY pin and support TCXO / DIO2-as-
+# RF-switch / boosted RX gain. The SX127x family uses DIO0 instead of
+# BUSY and has none of those knobs. Splitting here keeps the YAML clean
+# and keeps the C++ side from wiring up irrelevant options.
+SX126X_RADIOS = {"sx1262"}
+SX127X_RADIOS = {"sx1276", "sx1278"}
 
 
 CHANNEL_SCHEMA = cv.Schema(
@@ -155,6 +165,37 @@ def _validate_framework(value):
     return value
 
 
+def _validate_radio_pins(config):
+    """Per-radio sanity checks on which pins must / must not be set."""
+    radio = config[CONF_RADIO]
+    has_busy = CONF_BUSY_PIN in config
+    has_dio0 = CONF_DIO0_PIN in config
+    if radio in SX126X_RADIOS:
+        if not has_busy:
+            raise cv.Invalid(
+                f"radio: {radio} requires busy_pin (the SX126x BUSY line). "
+                "If your board has no BUSY pin, you probably want radio: "
+                "sx1276 or sx1278 instead."
+            )
+        if has_dio0:
+            raise cv.Invalid(
+                f"radio: {radio} does not use dio0_pin. The SX126x family "
+                "uses DIO1 + BUSY only; remove dio0_pin from your config."
+            )
+    elif radio in SX127X_RADIOS:
+        if not has_dio0:
+            raise cv.Invalid(
+                f"radio: {radio} requires dio0_pin (the SX127x packet-done "
+                "interrupt line)."
+            )
+        if has_busy:
+            raise cv.Invalid(
+                f"radio: {radio} does not use busy_pin. The SX127x family "
+                "uses DIO0 + DIO1 only; remove busy_pin from your config."
+            )
+    return config
+
+
 CONFIG_SCHEMA = cv.All(
     cv.Schema(
         {
@@ -166,7 +207,11 @@ CONFIG_SCHEMA = cv.All(
             cv.Required(CONF_CS_PIN): pins.internal_gpio_output_pin_number,
             cv.Required(CONF_DIO1_PIN): pins.internal_gpio_input_pin_number,
             cv.Required(CONF_RESET_PIN): pins.internal_gpio_output_pin_number,
-            cv.Required(CONF_BUSY_PIN): pins.internal_gpio_input_pin_number,
+            # busy_pin is for SX126x, dio0_pin is for SX127x. We accept
+            # either at parse time and require the right one for the
+            # chosen radio in _validate_radio_pins below.
+            cv.Optional(CONF_BUSY_PIN): pins.internal_gpio_input_pin_number,
+            cv.Optional(CONF_DIO0_PIN): pins.internal_gpio_input_pin_number,
             # Defaults match upstream MeshCore's platformio.ini, so a
             # node configured with just radio + pins talks on the
             # public mesh out of the box. Override frequency for
@@ -180,6 +225,7 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_SPREADING_FACTOR, default=8): cv.int_range(min=5, max=12),
             cv.Optional(CONF_CODING_RATE, default=5): cv.int_range(min=5, max=8),
             cv.Optional(CONF_TX_POWER, default=17): cv.int_range(min=-9, max=22),
+            # SX126x-only knobs. Ignored on SX127x.
             cv.Optional(CONF_TCXO_VOLTAGE, default=1.6): cv.float_range(min=0.0, max=3.3),
             cv.Optional(CONF_DIO2_AS_RF_SWITCH, default=False): cv.boolean,
             cv.Optional(CONF_RX_BOOSTED_GAIN, default=False): cv.boolean,
@@ -190,6 +236,7 @@ CONFIG_SCHEMA = cv.All(
         }
     ).extend(cv.COMPONENT_SCHEMA),
     _validate_framework,
+    _validate_radio_pins,
 )
 
 
@@ -205,39 +252,49 @@ async def to_code(config):
     for channel in config[CONF_CHANNELS]:
         cg.add(var.add_channel(channel["name"], channel[CONF_KEY]))
 
-    # Translate YAML config into the macros MeshCore's CustomSX1262::std_init
-    # and ESP32Board headers expect. Doing this at the build-flag level (vs.
-    # poking values in via setters) means the upstream helpers compile
-    # without modification.
+    # Translate YAML config into the macros MeshCore's CustomSX126x /
+    # CustomSX1276 helpers expect. Doing this at the build-flag level
+    # (vs. poking values in via setters) means the upstream helpers
+    # compile without modification.
+    radio = config[CONF_RADIO]
     flags = {
-        # Pin map used by CustomSX1262::std_init() and SPIClass::begin().
+        # Pin map shared across both radio families.
         "P_LORA_SCLK": config[CONF_SCLK_PIN],
         "P_LORA_MISO": config[CONF_MISO_PIN],
         "P_LORA_MOSI": config[CONF_MOSI_PIN],
         "P_LORA_NSS": config[CONF_CS_PIN],
         "P_LORA_DIO_1": config[CONF_DIO1_PIN],
         "P_LORA_RESET": config[CONF_RESET_PIN],
-        "P_LORA_BUSY": config[CONF_BUSY_PIN],
         # Radio params consumed by std_init.
         "LORA_FREQ": f"{config[CONF_FREQUENCY]:.4f}f",
         "LORA_BW": f"{config[CONF_BANDWIDTH]:.2f}f",
         "LORA_SF": config[CONF_SPREADING_FACTOR],
         "LORA_CR": config[CONF_CODING_RATE],
         "LORA_TX_POWER": config[CONF_TX_POWER],
-        "SX126X_DIO3_TCXO_VOLTAGE": f"{config[CONF_TCXO_VOLTAGE]:.2f}f",
     }
-    if config[CONF_DIO2_AS_RF_SWITCH]:
-        flags["SX126X_DIO2_AS_RF_SWITCH"] = "true"
-    if config[CONF_RX_BOOSTED_GAIN]:
-        flags["SX126X_RX_BOOSTED_GAIN"] = "true"
+
+    if radio in SX126X_RADIOS:
+        # SX126x uses BUSY + DIO1, supports TCXO + DIO2-as-RF-switch +
+        # boosted RX gain.
+        flags["P_LORA_BUSY"] = config[CONF_BUSY_PIN]
+        flags["SX126X_DIO3_TCXO_VOLTAGE"] = f"{config[CONF_TCXO_VOLTAGE]:.2f}f"
+        if config[CONF_DIO2_AS_RF_SWITCH]:
+            flags["SX126X_DIO2_AS_RF_SWITCH"] = "true"
+        if config[CONF_RX_BOOSTED_GAIN]:
+            flags["SX126X_RX_BOOSTED_GAIN"] = "true"
+    elif radio in SX127X_RADIOS:
+        # SX127x uses DIO0 (packet-done IRQ) + DIO1. No TCXO knob.
+        flags["P_LORA_DIO_0"] = config[CONF_DIO0_PIN]
+
     if (battery_pin := config.get(CONF_BATTERY_PIN)) is not None:
         flags["PIN_VBAT_READ"] = battery_pin
 
     for name, value in flags.items():
         cg.add_build_flag(f"-D{name}={value}")
 
-    # Variant gate (USE_SX1262, ...) consumed by MeshCore's CustomSX1262Wrapper.
-    cg.add_build_flag(f"-D{RADIO_TYPES[config[CONF_RADIO]]}=1")
+    # Variant gate (USE_SX1262 / USE_SX1276) consumed by MeshCore's
+    # CustomSX126xWrapper / CustomSX1276Wrapper headers.
+    cg.add_build_flag(f"-D{RADIO_TYPES[radio]}=1")
 
     # MeshCore reaches into RadioLib's private members (e.g. SX126x::mod,
     # spreadingFactor, freqMHz). Upstream's platformio.ini sets these

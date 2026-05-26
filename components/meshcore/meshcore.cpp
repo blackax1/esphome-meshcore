@@ -41,17 +41,28 @@ void MeshCoreComponent::setup() {
   this->board_.begin();
   this->rtc_clock_.begin();
 
-  this->radio_ = std::unique_ptr<CustomSX1262>(
-      new CustomSX1262(new Module(P_LORA_NSS, P_LORA_DIO_1, P_LORA_RESET, P_LORA_BUSY)));
+  // Construct the concrete radio. The Module(...) constructor takes
+  // different signal pins for the two families:
+  //   SX126x: NSS, DIO1, RESET, BUSY (BUSY is the SX126x-specific
+  //           "modem busy" pin)
+  //   SX127x: NSS, DIO0, RESET, DIO1 (DIO0 = packet-done IRQ; no
+  //           BUSY pin on this family)
+#if defined(USE_SX1262)
+  this->radio_ = std::unique_ptr<ConcreteRadio>(
+      new ConcreteRadio(new Module(P_LORA_NSS, P_LORA_DIO_1, P_LORA_RESET, P_LORA_BUSY)));
+#elif defined(USE_SX1276)
+  this->radio_ = std::unique_ptr<ConcreteRadio>(
+      new ConcreteRadio(new Module(P_LORA_NSS, P_LORA_DIO_0, P_LORA_RESET, P_LORA_DIO_1)));
+#endif
 
   if (!this->radio_->std_init(&SPI)) {
-    ESP_LOGE(TAG, "SX1262 init failed; mesh stack will stay disabled");
+    ESP_LOGE(TAG, "radio init failed; mesh stack will stay disabled");
     this->mark_failed();
     return;
   }
 
-  this->radio_wrapper_ = std::unique_ptr<CustomSX1262Wrapper>(
-      new CustomSX1262Wrapper(*this->radio_, this->board_));
+  this->radio_wrapper_ = std::unique_ptr<ConcreteRadioWrapper>(
+      new ConcreteRadioWrapper(*this->radio_, this->board_));
 
   this->packet_mgr_ = std::unique_ptr<StaticPoolPacketManager>(
       new StaticPoolPacketManager(PACKET_POOL_SIZE));
@@ -136,9 +147,15 @@ void MeshCoreComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "  Spreading factor: %d", (int) LORA_SF);
   ESP_LOGCONFIG(TAG, "  Coding rate: 4/%d", (int) LORA_CR);
   ESP_LOGCONFIG(TAG, "  TX power: %d dBm", (int) LORA_TX_POWER);
+#if defined(USE_SX1262)
   ESP_LOGCONFIG(TAG, "  Pins: SCLK=%d MISO=%d MOSI=%d NSS=%d DIO1=%d RST=%d BUSY=%d",
                 P_LORA_SCLK, P_LORA_MISO, P_LORA_MOSI, P_LORA_NSS,
                 P_LORA_DIO_1, P_LORA_RESET, P_LORA_BUSY);
+#elif defined(USE_SX1276)
+  ESP_LOGCONFIG(TAG, "  Pins: SCLK=%d MISO=%d MOSI=%d NSS=%d DIO0=%d DIO1=%d RST=%d",
+                P_LORA_SCLK, P_LORA_MISO, P_LORA_MOSI, P_LORA_NSS,
+                P_LORA_DIO_0, P_LORA_DIO_1, P_LORA_RESET);
+#endif
   ESP_LOGCONFIG(TAG, "  Channels configured: %u", (unsigned) this->channels_.size());
   ESP_LOGCONFIG(TAG, "  Identity source: %s",
                 this->static_identity_hex_.empty() ? "NVS (auto)" : "YAML private_key");
