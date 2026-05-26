@@ -271,8 +271,8 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_BATTERY_PIN): pins.internal_gpio_input_pin_number,
             cv.Optional(CONF_PRIVATE_KEY): _validate_identity_hex,
             cv.Optional(CONF_CHANNELS, default=[]): cv.ensure_list(CHANNEL_SCHEMA),
-            cv.Optional(CONF_GPS_LATITUDE): cv.latitude,
-            cv.Optional(CONF_GPS_LONGITUDE): cv.longitude,
+            cv.Optional(CONF_GPS_LATITUDE): cv.float_range(min=-90, max=90),
+            cv.Optional(CONF_GPS_LONGITUDE): cv.float_range(min=-180, max=180),
         }
     ).extend(cv.COMPONENT_SCHEMA),
     _validate_framework,
