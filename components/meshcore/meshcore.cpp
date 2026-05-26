@@ -46,7 +46,8 @@ void MeshCoreComponent::setup() {
   //   SX126x: NSS, DIO1, RESET, BUSY (BUSY is the SX126x-specific
   //           "modem busy" pin)
   //   SX127x: NSS, DIO0, RESET, DIO1 (DIO0 = packet-done IRQ; no
-  //           BUSY pin on this family)
+  //           BUSY pin on this family). DIO1 is optional on SX127x;
+  //           pass RADIOLIB_NC when omitted so RadioLib polls.
 #if defined(USE_SX1262)
   this->radio_ = std::unique_ptr<ConcreteRadio>(
       new ConcreteRadio(new Module(P_LORA_NSS, P_LORA_DIO_1, P_LORA_RESET, P_LORA_BUSY)));
@@ -55,17 +56,54 @@ void MeshCoreComponent::setup() {
       new ConcreteRadio(new Module(P_LORA_NSS, P_LORA_DIO_0, P_LORA_RESET, P_LORA_DIO_1)));
 #endif
 
-  if (!this->radio_->std_init(&SPI)) {
-    ESP_LOGE(TAG, "radio init failed; mesh stack will stay disabled");
-    ESP_LOGE(TAG, "  Common causes:");
-    ESP_LOGE(TAG, "  - wrong SPI / DIO / RST pins (re-check your board's schematic)");
-    ESP_LOGE(TAG, "  - radio LDO not powered (some boards require axp192/axp2101");
-    ESP_LOGE(TAG, "    setup before this component runs)");
-    ESP_LOGE(TAG, "  - dio1_pin set on a board where DIO1 isn't wired (try");
-    ESP_LOGE(TAG, "    omitting it on SX127x; required only on SX126x)");
+  // Rather than calling MeshCore's std_init() (which logs to Serial
+  // and returns just a bool), drive RadioLib's begin() directly so
+  // any failure surfaces with a numeric error code in the ESPHome log.
+  // The parameters mirror upstream's CustomSX1262/SX1276::std_init
+  // helpers so behaviour is the same on success.
+  SPI.begin(P_LORA_SCLK, P_LORA_MISO, P_LORA_MOSI);
+#if defined(USE_SX1262)
+  float tcxo = SX126X_DIO3_TCXO_VOLTAGE;
+  int16_t status = this->radio_->begin(LORA_FREQ, LORA_BW, LORA_SF, LORA_CR,
+                                       RADIOLIB_SX126X_SYNC_WORD_PRIVATE,
+                                       LORA_TX_POWER, 16, tcxo);
+  if (status == RADIOLIB_ERR_SPI_CMD_FAILED || status == RADIOLIB_ERR_SPI_CMD_INVALID) {
+    // Common on boards without a TCXO: retry with the XOSC (0V) path.
+    ESP_LOGW(TAG, "radio init: TCXO failed (status=%d), retrying with XOSC", status);
+    status = this->radio_->begin(LORA_FREQ, LORA_BW, LORA_SF, LORA_CR,
+                                 RADIOLIB_SX126X_SYNC_WORD_PRIVATE,
+                                 LORA_TX_POWER, 16, 0.0f);
+  }
+#elif defined(USE_SX1276)
+  int16_t status = this->radio_->begin(LORA_FREQ, LORA_BW, LORA_SF, LORA_CR,
+                                       RADIOLIB_SX126X_SYNC_WORD_PRIVATE,
+                                       LORA_TX_POWER, 16);
+#endif
+
+  if (status != RADIOLIB_ERR_NONE) {
+    ESP_LOGE(TAG, "radio init failed (RadioLib status=%d); mesh stack will stay disabled",
+             (int) status);
+    ESP_LOGE(TAG, "  RadioLib error code reference:");
+    ESP_LOGE(TAG, "    -2: RADIOLIB_ERR_CHIP_NOT_FOUND (radio not responding to SPI)");
+    ESP_LOGE(TAG, "    -16: RADIOLIB_ERR_INVALID_FREQUENCY (frequency outside chip range)");
+    ESP_LOGE(TAG, "    -17: RADIOLIB_ERR_INVALID_OUTPUT_POWER (tx_power out of range)");
+    ESP_LOGE(TAG, "    -707: RADIOLIB_ERR_SPI_CMD_FAILED (TCXO or SPI hardware issue)");
+    ESP_LOGE(TAG, "  Common causes: wrong SPI/DIO/RST pins; radio LDO unpowered;");
+    ESP_LOGE(TAG, "  dio1_pin set on a board that doesn't wire DIO1 (try omitting).");
     this->mark_failed();
     return;
   }
+
+  // CRC + any radio-family-specific tunings that std_init applied.
+  this->radio_->setCRC(1);
+#if defined(USE_SX1262)
+#ifdef SX126X_DIO2_AS_RF_SWITCH
+  this->radio_->setDio2AsRfSwitch(SX126X_DIO2_AS_RF_SWITCH);
+#endif
+#ifdef SX126X_RX_BOOSTED_GAIN
+  this->radio_->setRxBoostedGainMode(SX126X_RX_BOOSTED_GAIN);
+#endif
+#endif
 
   this->radio_wrapper_ = std::unique_ptr<ConcreteRadioWrapper>(
       new ConcreteRadioWrapper(*this->radio_, this->board_));
