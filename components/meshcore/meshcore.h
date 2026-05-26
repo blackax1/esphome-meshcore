@@ -121,10 +121,9 @@ class MeshCoreComponent : public Component {
   void set_static_identity(const std::string &hex) { this->static_identity_hex_ = hex; }
   void set_repeater(bool repeater) { this->repeater_ = repeater; }
   bool is_repeater() const { return this->repeater_; }
-  /// Period in seconds between automatic self-adverts in repeater mode.
-  /// 0 means advert only at boot. Companion role ignores this.
-  void set_advert_interval(uint32_t seconds) { this->advert_interval_sec_ = seconds; }
-  void set_advert_interval(uint32_t seconds) { this->advert_interval_sec_ = seconds; }
+   /// Period in seconds between automatic self-adverts in repeater mode.
+   /// 0 means advert only at boot. Companion role ignores this.
+   void set_advert_interval(uint32_t seconds) { this->advert_interval_sec_ = seconds; }
 
   void set_last_message_sensor(MeshCoreTextSensor *s) { this->last_message_sensor_ = s; }
   void set_sensor_bundle(MeshCoreSensorBundle *b) { this->sensors_ = b; }
@@ -157,14 +156,13 @@ class MeshCoreComponent : public Component {
   void on_battery_sample_();
   void send_self_advert_();
 
-  std::string node_name_{"esphome-mesh"};
-  bool repeater_{false};
-  uint32_t advert_interval_sec_{0};
-  uint32_t last_advert_ms_{0};
-  // How often a repeater re-broadcasts its self-advert. 0 = boot only.
-  // Default 1800 s (30 min) matches upstream simple_repeater's
-  // duty-cycle-conscious cadence. Companion role ignores this.
-  uint32_t advert_interval_sec_{1800};
+   std::string node_name_{"esphome-mesh"};
+   bool repeater_{false};
+   // How often a repeater re-broadcasts its self-advert. 0 = boot only.
+   // Default 1800 s (30 min) matches upstream simple_repeater's
+   // duty-cycle-conscious cadence. Companion role ignores this.
+   uint32_t advert_interval_sec_{1800};
+   uint32_t last_advert_ms_{0};
   // Optional hex-encoded static identity from YAML. When non-empty,
   // wins over whatever's cached in NVS.
   std::string static_identity_hex_;
@@ -202,12 +200,11 @@ class MeshCoreComponent : public Component {
   std::unique_ptr<ConcreteRadio> radio_;
   std::unique_ptr<ConcreteRadioWrapper> radio_wrapper_;
   std::unique_ptr<StaticPoolPacketManager> packet_mgr_;
-  std::unique_ptr<EsphomeMesh> mesh_;
+   std::unique_ptr<EsphomeMesh> mesh_;
 
-  bool ready_{false};
-  bool mesh_time_synced_{false};
-  uint32_t last_battery_pub_ms_{0};
-  uint32_t last_advert_ms_{0};
+   bool ready_{false};
+   bool mesh_time_synced_{false};
+   uint32_t last_battery_pub_ms_{0};
 
   // Preference handle for the persisted identity blob (prv_key + pub_key).
   ESPPreferenceObject identity_pref_;
