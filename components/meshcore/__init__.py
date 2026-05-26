@@ -289,6 +289,15 @@ async def to_code(config):
         "LORA_SF": config[CONF_SPREADING_FACTOR],
         "LORA_CR": config[CONF_CODING_RATE],
         "LORA_TX_POWER": config[CONF_TX_POWER],
+        # Suppress MeshCore's ESP32Board::begin() Wire.begin(). MeshCore
+        # only needs I2C if you're hooking up an RV-3028 RTC, which we
+        # don't (our RTC is the ESP32 internal clock). On boards where
+        # ESPHome's i2c: component has already claimed bus 0 (T-Beam
+        # AXP192/AXP2101 + OLED) the redundant Wire.begin() throws
+        # ESP_ERR_INVALID_STATE and aborts board init. -1 takes the
+        # no-op branch in ESP32Board.h.
+        "PIN_BOARD_SDA": -1,
+        "PIN_BOARD_SCL": -1,
     }
 
     if radio in SX126X_RADIOS:
