@@ -134,6 +134,8 @@ See [`example.yaml`](./example.yaml) for a complete file.
 | `role` | no | `companion` | One of `companion` (RX/TX only), `repeater` (also flood-forwards traffic) |
 | `private_key` | no | (auto) | Hex string: 64 bytes (prv only) or 96 bytes (prv+pub). When set, overrides the NVS cache and pins identity across reflashes. Use `!secret` |
 | `battery_pin` | no | — | ADC pin for `mesh::MainBoard::getBattMilliVolts` if your board exposes a battery divider |
+| `gps_latitude` | no | — | Latitude for self-advert packets (used with `gps_longitude`) |
+| `gps_longitude` | no | — | Longitude for self-advert packets (used with `gps_latitude`) |
 | `channels` | no | `[]` | List of `name` + `key` entries; see channel reference below |
 
 ### `channels:` entries
@@ -176,6 +178,31 @@ sensor:
 
 `rssi`/`snr` reflect the most recent received packet. `battery_voltage`
 samples once a minute via `mesh::MainBoard::getBattMilliVolts`.
+
+### GPS coordinates in self-advert
+
+Set `gps_latitude` and `gps_longitude` on the `meshcore:` block to include
+GPS coordinates in your node's self-advert packet. Other nodes that receive
+the advert will store the location in their routing tables, enabling
+location-based routing (hops, distance estimates) and letting you see where
+nodes live on a map.
+
+```yaml
+meshcore:
+  id: mesh_hub
+  radio: sx1262
+  # ... pins ...
+  gps_latitude: 37.7749
+  gps_longitude: -122.4194
+  channels:
+    - name: "Public"
+      key: "izOH6cXN6mrJ5e26oRXNcg=="
+```
+
+Both fields use ESPHome's `cv.latitude` / `cv.longitude` validators
+(±90 / ±180 range). Leave them unset if the node has no GPS fix — the
+advert is sent with `lat = 0, lon = 0` which upstream tools treat as
+"unknown location".
 
 ### `meshcore.send_text_message` action
 
