@@ -23,6 +23,8 @@ from esphome.const import (
     CONF_MOSI_PIN,
     CONF_RESET_PIN,
     CONF_TEXT,
+    CONF_LATITUDE,
+    CONF_LONGITUDE,
 )
 
 CODEOWNERS = ["@yourgithub"]
@@ -58,6 +60,8 @@ CONF_CHANNELS = "channels"
 CONF_CHANNEL = "channel"
 CONF_KEY = "key"
 CONF_PRIVATE_KEY = "private_key"
+CONF_GPS_LATITUDE = "gps_latitude"
+CONF_GPS_LONGITUDE = "gps_longitude"
 
 
 def _validate_channel_key(value):
@@ -267,6 +271,8 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_BATTERY_PIN): pins.internal_gpio_input_pin_number,
             cv.Optional(CONF_PRIVATE_KEY): _validate_identity_hex,
             cv.Optional(CONF_CHANNELS, default=[]): cv.ensure_list(CHANNEL_SCHEMA),
+            cv.Optional(CONF_GPS_LATITUDE): cv.latitude,
+            cv.Optional(CONF_GPS_LONGITUDE): cv.longitude,
         }
     ).extend(cv.COMPONENT_SCHEMA),
     _validate_framework,
@@ -287,6 +293,9 @@ async def to_code(config):
 
     for channel in config[CONF_CHANNELS]:
         cg.add(var.add_channel(channel["name"], channel[CONF_KEY]))
+
+    if CONF_GPS_LATITUDE in config and CONF_GPS_LONGITUDE in config:
+        cg.add(var.set_gps_location(config[CONF_GPS_LATITUDE], config[CONF_GPS_LONGITUDE]))
 
     # Translate YAML config into the macros MeshCore's CustomSX126x /
     # CustomSX1276 helpers expect. Doing this at the build-flag level

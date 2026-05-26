@@ -120,6 +120,11 @@ class MeshCoreComponent : public Component {
   void set_node_name(const std::string &name) { this->node_name_ = name; }
   void set_static_identity(const std::string &hex) { this->static_identity_hex_ = hex; }
   void set_repeater(bool repeater) { this->repeater_ = repeater; }
+  void set_gps_location(float latitude, float longitude) {
+    this->gps_lat_ = latitude;
+    this->gps_lng_ = longitude;
+    this->gps_valid_ = !(std::isnan(latitude) || std::isnan(longitude));
+  }
   bool is_repeater() const { return this->repeater_; }
    /// Period in seconds between automatic self-adverts in repeater mode.
    /// 0 means advert only at boot. Companion role ignores this.
@@ -212,6 +217,11 @@ class MeshCoreComponent : public Component {
   // adopted into our RTC. Persisted so the next boot doesn't fall back
   // to MeshCore's hard-coded May 2024 baseline.
   ESPPreferenceObject mesh_time_pref_;
+
+  // GPS location for self-adverts. NaN means no GPS.
+  float gps_lat_{std::nanf("")};
+  float gps_lng_{std::nanf("")};
+  bool gps_valid_{false};
 };
 
 }  // namespace meshcore
