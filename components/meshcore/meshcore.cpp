@@ -433,7 +433,12 @@ bool EsphomeMesh::allowPacketForward(const mesh::Packet *packet) {
   // companion role: never forward (upstream default).
   // repeater role: forward; the dispatcher's dedup tables, path-length
   // ceiling (MAX_PATH_SIZE), and air-time budget keep things sane.
-  return this->owner_->is_repeater();
+  const bool ok = this->owner_->is_repeater();
+  if (ok) {
+    ESP_LOGD(TAG, "fwd: type=%u path_len=%u",
+             (unsigned) packet->getPayloadType(), (unsigned) packet->path_len);
+  }
+  return ok;
 }
 
 void EsphomeMesh::onGroupDataRecv(mesh::Packet *packet, uint8_t type,
