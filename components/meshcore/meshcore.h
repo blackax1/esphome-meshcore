@@ -57,6 +57,12 @@ class EsphomeMesh : public mesh::Mesh {
   void onGroupDataRecv(mesh::Packet *packet, uint8_t type, const mesh::GroupChannel &channel,
                        uint8_t *data, size_t len) override;
 
+  /// Whether to flood-forward packets we hear. Defaults to false (the
+  /// upstream Mesh::allowPacketForward default — companion behaviour).
+  /// In repeater role we let everything through; the dispatcher's
+  /// dedup tables and path-length checks still keep the network sane.
+  bool allowPacketForward(const mesh::Packet *packet) override;
+
  private:
   MeshCoreComponent *owner_;
 };
@@ -110,6 +116,8 @@ class MeshCoreComponent : public Component {
 
   void set_node_name(const std::string &name) { this->node_name_ = name; }
   void set_static_identity(const std::string &hex) { this->static_identity_hex_ = hex; }
+  void set_repeater(bool repeater) { this->repeater_ = repeater; }
+  bool is_repeater() const { return this->repeater_; }
 
   void set_last_message_sensor(MeshCoreTextSensor *s) { this->last_message_sensor_ = s; }
   void set_sensor_bundle(MeshCoreSensorBundle *b) { this->sensors_ = b; }
@@ -140,8 +148,10 @@ class MeshCoreComponent : public Component {
  protected:
   bool load_or_create_identity_();
   void on_battery_sample_();
+  void send_self_advert_();
 
   std::string node_name_{"esphome-mesh"};
+  bool repeater_{false};
   // Optional hex-encoded static identity from YAML. When non-empty,
   // wins over whatever's cached in NVS.
   std::string static_identity_hex_;

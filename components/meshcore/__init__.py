@@ -39,6 +39,7 @@ MeshCoreComponent = meshcore_ns.class_("MeshCoreComponent", cg.Component)
 SendTextMessageAction = meshcore_ns.class_("SendTextMessageAction", automation.Action)
 
 CONF_RADIO = "radio"
+CONF_ROLE = "role"
 CONF_SCLK_PIN = "sclk_pin"
 CONF_DIO0_PIN = "dio0_pin"
 CONF_DIO1_PIN = "dio1_pin"
@@ -129,6 +130,21 @@ RADIO_TYPES = {
 # and keeps the C++ side from wiring up irrelevant options.
 SX126X_RADIOS = {"sx1262"}
 SX127X_RADIOS = {"sx1276", "sx1278"}
+
+# Node behaviour roles.
+#
+# - companion: hear traffic, send when asked, do NOT retransmit. This is
+#   what most ESPHome users want — a leaf node attached to Home Assistant
+#   that emits sensor readings and surfaces incoming messages but
+#   doesn't add load to the mesh.
+# - repeater: companion behaviour + flood-forward every received packet
+#   that we haven't already seen, up to MeshCore's normal hop limit. Use
+#   when the device is a static, well-powered relay covering a gap
+#   between other nodes. Adds duty-cycle pressure on the channel.
+ROLES = {
+    "companion": "ROLE_COMPANION",
+    "repeater": "ROLE_REPEATER",
+}
 
 
 CHANNEL_SCHEMA = cv.Schema(
@@ -230,6 +246,7 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_DIO2_AS_RF_SWITCH, default=False): cv.boolean,
             cv.Optional(CONF_RX_BOOSTED_GAIN, default=False): cv.boolean,
             cv.Optional(CONF_NODE_NAME, default="esphome-mesh"): cv.string_strict,
+            cv.Optional(CONF_ROLE, default="companion"): cv.enum(ROLES, lower=True),
             cv.Optional(CONF_BATTERY_PIN): pins.internal_gpio_input_pin_number,
             cv.Optional(CONF_PRIVATE_KEY): _validate_identity_hex,
             cv.Optional(CONF_CHANNELS, default=[]): cv.ensure_list(CHANNEL_SCHEMA),
@@ -245,6 +262,7 @@ async def to_code(config):
     await cg.register_component(var, config)
 
     cg.add(var.set_node_name(config[CONF_NODE_NAME]))
+    cg.add(var.set_repeater(config[CONF_ROLE] == "repeater"))
 
     if (private_key := config.get(CONF_PRIVATE_KEY)) is not None:
         cg.add(var.set_static_identity(private_key))

@@ -120,6 +120,14 @@ void MeshCoreComponent::setup() {
   this->mesh_->begin();
   this->ready_ = true;
 
+  // Repeaters announce themselves at boot so other nodes can discover
+  // them and route through. Companion nodes stay quiet by default —
+  // they don't relay traffic, so polluting the air with adverts buys
+  // them nothing and just adds congestion.
+  if (this->repeater_) {
+    this->send_self_advert_();
+  }
+
   ESP_LOGCONFIG(TAG, "MeshCore ready, pubkey prefix = %02x%02x%02x%02x",
                 this->mesh_->self_id.pub_key[0], this->mesh_->self_id.pub_key[1],
                 this->mesh_->self_id.pub_key[2], this->mesh_->self_id.pub_key[3]);
@@ -157,6 +165,7 @@ void MeshCoreComponent::dump_config() {
                 P_LORA_DIO_0, P_LORA_DIO_1, P_LORA_RESET);
 #endif
   ESP_LOGCONFIG(TAG, "  Channels configured: %u", (unsigned) this->channels_.size());
+  ESP_LOGCONFIG(TAG, "  Role: %s", this->repeater_ ? "repeater" : "companion");
   ESP_LOGCONFIG(TAG, "  Identity source: %s",
                 this->static_identity_hex_.empty() ? "NVS (auto)" : "YAML private_key");
   ESP_LOGCONFIG(TAG, "  RTC time: %u (%s)",
@@ -271,6 +280,22 @@ void MeshCoreComponent::bump_rtc_from_mesh(uint32_t mesh_timestamp) {
   global_preferences->sync();
 }
 
+void MeshCoreComponent::send_self_advert_() {
+  // App_data is just the human-readable node name, matching upstream
+  // simple_repeater's createSelfAdvert(). Receivers display this in
+  // their contact list when auto-add is enabled.
+  const auto &name = this->node_name_;
+  const size_t name_len = std::min(name.size(), (size_t) MAX_ADVERT_DATA_SIZE);
+  mesh::Packet *pkt = this->mesh_->createAdvert(
+      this->mesh_->self_id, reinterpret_cast<const uint8_t *>(name.data()), name_len);
+  if (pkt == nullptr) {
+    ESP_LOGW(TAG, "self-advert: packet allocation failed");
+    return;
+  }
+  this->mesh_->sendFlood(pkt);
+  ESP_LOGCONFIG(TAG, "Sent self-advert as '%s'", name.c_str());
+}
+
 bool MeshCoreComponent::load_or_create_identity_() {
   // 1. YAML-supplied static identity beats everything else. Lets the
   //    operator pin a node's pubkey across reflashes (handy for
@@ -349,6 +374,13 @@ int EsphomeMesh::searchChannelsByHash(const uint8_t *hash, mesh::GroupChannel ch
     }
   }
   return matched;
+}
+
+bool EsphomeMesh::allowPacketForward(const mesh::Packet *packet) {
+  // companion role: never forward (upstream default).
+  // repeater role: forward; the dispatcher's dedup tables, path-length
+  // ceiling (MAX_PATH_SIZE), and air-time budget keep things sane.
+  return this->owner_->is_repeater();
 }
 
 void EsphomeMesh::onGroupDataRecv(mesh::Packet *packet, uint8_t type,
