@@ -56,6 +56,9 @@ class EsphomeMesh : public mesh::Mesh {
                            int max_matches) override;
   void onGroupDataRecv(mesh::Packet *packet, uint8_t type, const mesh::GroupChannel &channel,
                        uint8_t *data, size_t len) override;
+  void onTraceRecv(mesh::Packet *packet, uint32_t tag, uint32_t auth_code, uint8_t flags,
+                   const uint8_t *path_snrs, const uint8_t *path_hashes,
+                   uint8_t path_len) override;
 
   /// Whether to flood-forward packets we hear. Defaults to false (the
   /// upstream Mesh::allowPacketForward default — companion behaviour).
@@ -118,6 +121,10 @@ class MeshCoreComponent : public Component {
   void set_static_identity(const std::string &hex) { this->static_identity_hex_ = hex; }
   void set_repeater(bool repeater) { this->repeater_ = repeater; }
   bool is_repeater() const { return this->repeater_; }
+  /// Period in seconds between automatic self-adverts in repeater mode.
+  /// 0 means advert only at boot. Companion role ignores this.
+  void set_advert_interval(uint32_t seconds) { this->advert_interval_sec_ = seconds; }
+  void set_advert_interval(uint32_t seconds) { this->advert_interval_sec_ = seconds; }
 
   void set_last_message_sensor(MeshCoreTextSensor *s) { this->last_message_sensor_ = s; }
   void set_sensor_bundle(MeshCoreSensorBundle *b) { this->sensors_ = b; }
@@ -152,6 +159,12 @@ class MeshCoreComponent : public Component {
 
   std::string node_name_{"esphome-mesh"};
   bool repeater_{false};
+  uint32_t advert_interval_sec_{0};
+  uint32_t last_advert_ms_{0};
+  // How often a repeater re-broadcasts its self-advert. 0 = boot only.
+  // Default 1800 s (30 min) matches upstream simple_repeater's
+  // duty-cycle-conscious cadence. Companion role ignores this.
+  uint32_t advert_interval_sec_{1800};
   // Optional hex-encoded static identity from YAML. When non-empty,
   // wins over whatever's cached in NVS.
   std::string static_identity_hex_;
@@ -194,6 +207,7 @@ class MeshCoreComponent : public Component {
   bool ready_{false};
   bool mesh_time_synced_{false};
   uint32_t last_battery_pub_ms_{0};
+  uint32_t last_advert_ms_{0};
 
   // Preference handle for the persisted identity blob (prv_key + pub_key).
   ESPPreferenceObject identity_pref_;

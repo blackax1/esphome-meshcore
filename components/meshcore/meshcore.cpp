@@ -175,6 +175,7 @@ void MeshCoreComponent::setup() {
   // them nothing and just adds congestion.
   if (this->repeater_) {
     this->send_self_advert_();
+    this->last_advert_ms_ = millis();
   }
 
   ESP_LOGCONFIG(TAG, "MeshCore ready, pubkey prefix = %02x%02x%02x%02x",
@@ -193,6 +194,14 @@ void MeshCoreComponent::loop() {
   if (now - this->last_battery_pub_ms_ > 60000U) {
     this->last_battery_pub_ms_ = now;
     this->on_battery_sample_();
+  }
+
+  // Periodic self-advert in repeater mode so nodes that boot after we
+  // do can discover us without waiting for happenstance traffic.
+  if (this->repeater_ && this->advert_interval_sec_ > 0 &&
+      now - this->last_advert_ms_ > this->advert_interval_sec_ * 1000U) {
+    this->last_advert_ms_ = now;
+    this->send_self_advert_();
   }
 }
 
@@ -218,6 +227,20 @@ void MeshCoreComponent::dump_config() {
 #endif
   ESP_LOGCONFIG(TAG, "  Channels configured: %u", (unsigned) this->channels_.size());
   ESP_LOGCONFIG(TAG, "  Role: %s", this->repeater_ ? "repeater" : "companion");
+  if (this->repeater_) {
+    if (this->advert_interval_sec_ > 0) {
+      ESP_LOGCONFIG(TAG, "  Advert interval: %u s", (unsigned) this->advert_interval_sec_);
+    } else {
+      ESP_LOGCONFIG(TAG, "  Advert interval: boot only (advert_interval=0)");
+    }
+  }
+  if (this->repeater_) {
+    if (this->advert_interval_sec_ == 0) {
+      ESP_LOGCONFIG(TAG, "  Advert interval: boot only");
+    } else {
+      ESP_LOGCONFIG(TAG, "  Advert interval: %u s", (unsigned) this->advert_interval_sec_);
+    }
+  }
   ESP_LOGCONFIG(TAG, "  Identity source: %s",
                 this->static_identity_hex_.empty() ? "NVS (auto)" : "YAML private_key");
   ESP_LOGCONFIG(TAG, "  RTC time: %u (%s)",
@@ -427,6 +450,28 @@ int EsphomeMesh::searchChannelsByHash(const uint8_t *hash, mesh::GroupChannel ch
     }
   }
   return matched;
+}
+
+void EsphomeMesh::onTraceRecv(mesh::Packet *packet, uint32_t tag, uint32_t auth_code,
+                              uint8_t flags, const uint8_t *path_snrs,
+                              const uint8_t *path_hashes, uint8_t path_len) {
+  // Trace packet has reached us as its final destination -- meaning
+  // someone wanted to map a route to this node. The path traversal
+  // already happened on its way here (each repeater bumped path_snrs
+  // forward as it relayed), so by the time we run the originator has
+  // its data. We just log what we saw for the operator.
+  //
+  // path_snrs[i] is each hop's SNR scaled by 4 (so /4.0f for dB).
+  // The final SNR (this node's RX) comes from packet->getSNR().
+  ESP_LOGD(TAG, "trace tag=%08x auth=%08x flags=%02x hops=%u final_snr=%.1f dB",
+           (unsigned) tag, (unsigned) auth_code, (unsigned) flags,
+           (unsigned) path_len, packet->getSNR());
+  const uint8_t path_sz = flags & 0x03;
+  const uint8_t snrs_count = path_len >> path_sz;
+  for (uint8_t i = 0; i < snrs_count; i++) {
+    ESP_LOGD(TAG, "  trace hop %u: snr=%.2f dB", (unsigned) i,
+             ((int8_t) path_snrs[i]) / 4.0f);
+  }
 }
 
 bool EsphomeMesh::allowPacketForward(const mesh::Packet *packet) {

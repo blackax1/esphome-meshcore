@@ -40,6 +40,7 @@ SendTextMessageAction = meshcore_ns.class_("SendTextMessageAction", automation.A
 
 CONF_RADIO = "radio"
 CONF_ROLE = "role"
+CONF_ADVERT_INTERVAL = "advert_interval"
 CONF_SCLK_PIN = "sclk_pin"
 CONF_DIO0_PIN = "dio0_pin"
 CONF_DIO1_PIN = "dio1_pin"
@@ -258,6 +259,11 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_RX_BOOSTED_GAIN, default=False): cv.boolean,
             cv.Optional(CONF_NODE_NAME, default="esphome-mesh"): cv.string_strict,
             cv.Optional(CONF_ROLE, default="companion"): cv.enum(ROLES, lower=True),
+            # How often a repeater re-broadcasts its self-advert. 0 =
+            # advert only at boot. Companion role ignores this.
+            cv.Optional(
+                CONF_ADVERT_INTERVAL, default="0s"
+            ): cv.positive_time_period_seconds,
             cv.Optional(CONF_BATTERY_PIN): pins.internal_gpio_input_pin_number,
             cv.Optional(CONF_PRIVATE_KEY): _validate_identity_hex,
             cv.Optional(CONF_CHANNELS, default=[]): cv.ensure_list(CHANNEL_SCHEMA),
@@ -274,6 +280,7 @@ async def to_code(config):
 
     cg.add(var.set_node_name(config[CONF_NODE_NAME]))
     cg.add(var.set_repeater(config[CONF_ROLE] == "repeater"))
+    cg.add(var.set_advert_interval(config[CONF_ADVERT_INTERVAL].total_seconds))
 
     if (private_key := config.get(CONF_PRIVATE_KEY)) is not None:
         cg.add(var.set_static_identity(private_key))
