@@ -192,6 +192,7 @@ class MeshCoreComponent : public Component {
   std::unique_ptr<EsphomeMesh> mesh_;
 
   bool ready_{false};
+  bool mesh_time_synced_{false};
   uint32_t last_battery_pub_ms_{0};
 
   // Preference handle for the persisted identity blob (prv_key + pub_key).

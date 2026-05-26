@@ -186,12 +186,18 @@ def _validate_radio_pins(config):
     radio = config[CONF_RADIO]
     has_busy = CONF_BUSY_PIN in config
     has_dio0 = CONF_DIO0_PIN in config
+    has_dio1 = CONF_DIO1_PIN in config
     if radio in SX126X_RADIOS:
         if not has_busy:
             raise cv.Invalid(
                 f"radio: {radio} requires busy_pin (the SX126x BUSY line). "
                 "If your board has no BUSY pin, you probably want radio: "
                 "sx1276 or sx1278 instead."
+            )
+        if not has_dio1:
+            raise cv.Invalid(
+                f"radio: {radio} requires dio1_pin (the only IRQ line on "
+                "the SX126x family)."
             )
         if has_dio0:
             raise cv.Invalid(
@@ -209,6 +215,9 @@ def _validate_radio_pins(config):
                 f"radio: {radio} does not use busy_pin. The SX127x family "
                 "uses DIO0 + DIO1 only; remove busy_pin from your config."
             )
+        # dio1_pin is intentionally optional for SX127x. Many boards
+        # (T-Beam classic, Heltec V1) don't wire DIO1 at all. RadioLib
+        # accepts RADIOLIB_NC and falls back to polling.
     return config
 
 
@@ -221,11 +230,13 @@ CONFIG_SCHEMA = cv.All(
             cv.Required(CONF_MISO_PIN): pins.internal_gpio_input_pin_number,
             cv.Required(CONF_MOSI_PIN): pins.internal_gpio_output_pin_number,
             cv.Required(CONF_CS_PIN): pins.internal_gpio_output_pin_number,
-            cv.Required(CONF_DIO1_PIN): pins.internal_gpio_input_pin_number,
             cv.Required(CONF_RESET_PIN): pins.internal_gpio_output_pin_number,
             # busy_pin is for SX126x, dio0_pin is for SX127x. We accept
             # either at parse time and require the right one for the
-            # chosen radio in _validate_radio_pins below.
+            # chosen radio in _validate_radio_pins below. dio1_pin is
+            # required on SX126x (only IRQ line) but optional on SX127x
+            # (many boards don't wire it).
+            cv.Optional(CONF_DIO1_PIN): pins.internal_gpio_input_pin_number,
             cv.Optional(CONF_BUSY_PIN): pins.internal_gpio_input_pin_number,
             cv.Optional(CONF_DIO0_PIN): pins.internal_gpio_input_pin_number,
             # Defaults match upstream MeshCore's platformio.ini, so a
@@ -281,7 +292,12 @@ async def to_code(config):
         "P_LORA_MISO": config[CONF_MISO_PIN],
         "P_LORA_MOSI": config[CONF_MOSI_PIN],
         "P_LORA_NSS": config[CONF_CS_PIN],
-        "P_LORA_DIO_1": config[CONF_DIO1_PIN],
+        # DIO1 is required on SX126x and optional on SX127x. When the
+        # user doesn't supply it (T-Beam-class boards that don't wire
+        # DIO1), pass RadioLib's "not connected" sentinel so the driver
+        # falls back to polling instead of waiting for an interrupt
+        # that's never going to fire.
+        "P_LORA_DIO_1": config.get(CONF_DIO1_PIN, "RADIOLIB_NC"),
         "P_LORA_RESET": config[CONF_RESET_PIN],
         # Radio params consumed by std_init.
         "LORA_FREQ": f"{config[CONF_FREQUENCY]:.4f}f",

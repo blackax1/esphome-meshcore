@@ -57,6 +57,12 @@ void MeshCoreComponent::setup() {
 
   if (!this->radio_->std_init(&SPI)) {
     ESP_LOGE(TAG, "radio init failed; mesh stack will stay disabled");
+    ESP_LOGE(TAG, "  Common causes:");
+    ESP_LOGE(TAG, "  - wrong SPI / DIO / RST pins (re-check your board's schematic)");
+    ESP_LOGE(TAG, "  - radio LDO not powered (some boards require axp192/axp2101");
+    ESP_LOGE(TAG, "    setup before this component runs)");
+    ESP_LOGE(TAG, "  - dio1_pin set on a board where DIO1 isn't wired (try");
+    ESP_LOGE(TAG, "    omitting it on SX127x; required only on SX126x)");
     this->mark_failed();
     return;
   }
@@ -89,6 +95,7 @@ void MeshCoreComponent::setup() {
   uint32_t saved_ts = 0;
   if (this->mesh_time_pref_.load(&saved_ts) && saved_ts >= MESH_TIME_FLOOR) {
     this->rtc_clock_.setCurrentTime(saved_ts);
+    this->mesh_time_synced_ = true;
     ESP_LOGCONFIG(TAG, "RTC restored from NVS: %u", (unsigned) saved_ts);
   }
 
@@ -162,7 +169,10 @@ void MeshCoreComponent::dump_config() {
 #elif defined(USE_SX1276)
   ESP_LOGCONFIG(TAG, "  Pins: SCLK=%d MISO=%d MOSI=%d NSS=%d DIO0=%d DIO1=%d RST=%d",
                 P_LORA_SCLK, P_LORA_MISO, P_LORA_MOSI, P_LORA_NSS,
-                P_LORA_DIO_0, P_LORA_DIO_1, P_LORA_RESET);
+                P_LORA_DIO_0, (int) P_LORA_DIO_1, P_LORA_RESET);
+  if ((int) P_LORA_DIO_1 == RADIOLIB_NC) {
+    ESP_LOGCONFIG(TAG, "  (DIO1 not wired, falling back to polling)");
+  }
 #endif
   ESP_LOGCONFIG(TAG, "  Channels configured: %u", (unsigned) this->channels_.size());
   ESP_LOGCONFIG(TAG, "  Role: %s", this->repeater_ ? "repeater" : "companion");
@@ -170,7 +180,7 @@ void MeshCoreComponent::dump_config() {
                 this->static_identity_hex_.empty() ? "NVS (auto)" : "YAML private_key");
   ESP_LOGCONFIG(TAG, "  RTC time: %u (%s)",
                 (unsigned) this->rtc_clock_.getCurrentTime(),
-                this->rtc_clock_.getCurrentTime() >= MESH_TIME_FLOOR
+                this->mesh_time_synced_
                     ? "synced from mesh"
                     : "baseline (waiting for advert)");
   ESP_LOGCONFIG(TAG, "  Mesh ready: %s", YESNO(this->ready_));
@@ -269,6 +279,7 @@ void MeshCoreComponent::bump_rtc_from_mesh(uint32_t mesh_timestamp) {
     return;  // already current enough
   }
   this->rtc_clock_.setCurrentTime(mesh_timestamp);
+  this->mesh_time_synced_ = true;
   ESP_LOGD(TAG, "rtc bumped from mesh: %u -> %u (+%u s)",
            (unsigned) now, (unsigned) mesh_timestamp,
            (unsigned) (mesh_timestamp - now));
