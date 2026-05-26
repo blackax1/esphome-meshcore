@@ -83,11 +83,15 @@ void MeshCoreComponent::setup() {
   if (status != RADIOLIB_ERR_NONE) {
     ESP_LOGE(TAG, "radio init failed (RadioLib status=%d); mesh stack will stay disabled",
              (int) status);
-    ESP_LOGE(TAG, "  RadioLib error code reference:");
-    ESP_LOGE(TAG, "    -2: RADIOLIB_ERR_CHIP_NOT_FOUND (radio not responding to SPI)");
-    ESP_LOGE(TAG, "    -16: RADIOLIB_ERR_INVALID_FREQUENCY (frequency outside chip range)");
-    ESP_LOGE(TAG, "    -17: RADIOLIB_ERR_INVALID_OUTPUT_POWER (tx_power out of range)");
-    ESP_LOGE(TAG, "    -707: RADIOLIB_ERR_SPI_CMD_FAILED (TCXO or SPI hardware issue)");
+    ESP_LOGE(TAG, "  RadioLib error code reference (sx126x/sx127x):");
+    ESP_LOGE(TAG, "    -2:   chip not found (radio not responding to SPI)");
+    ESP_LOGE(TAG, "    -8:   invalid bandwidth for this chip");
+    ESP_LOGE(TAG, "    -9:   invalid spreading factor for this chip");
+    ESP_LOGE(TAG, "    -10:  invalid coding rate for this chip");
+    ESP_LOGE(TAG, "    -12:  invalid frequency for this chip");
+    ESP_LOGE(TAG, "    -13:  invalid output power (try lowering tx_power; SX1276");
+    ESP_LOGE(TAG, "          PA_BOOST tops out around +17 dBm with default config)");
+    ESP_LOGE(TAG, "    -707: SPI cmd failed (TCXO mismatch on SX126x)");
     ESP_LOGE(TAG, "  Common causes: wrong SPI/DIO/RST pins; radio LDO unpowered;");
     ESP_LOGE(TAG, "  dio1_pin set on a board that doesn't wire DIO1 (try omitting).");
     this->mark_failed();
