@@ -357,21 +357,13 @@ void MeshCoreComponent::bump_rtc_from_mesh(uint32_t mesh_timestamp) {
 }
 
 void MeshCoreComponent::send_self_advert_() {
-  // Build an advert payload with node name + optional GPS location,
-  // matching upstream simple_repeater's self-advert format.
-  mesh::AdvertDataPack ad{};
+  // Build a self-advert containing just the node name, matching
+  // upstream simple_repeater's format: a raw ASCII string payload.
   const auto &name = this->node_name_;
-  const size_t name_len = std::min(name.size(), (size_t) MAX_ADVERT_DATA_SIZE);
-  StrHelper::strncpy(ad.name, name.c_str(), sizeof(ad.name));
-
-  if (this->gps_valid_) {
-    const bool lat_ok = mesh::tryPackLocation(ad.location, this->gps_lat_, this->gps_lng_);
-    if (lat_ok) {
-      ESP_LOGD(TAG, "self-advert: lat=%.6f lon=%.6f", this->gps_lat_, this->gps_lng_);
-    }
-  }
-
-  mesh::Packet *pkt = this->mesh_->createAdvert(this->mesh_->self_id, &ad);
+  mesh::Packet *pkt = this->mesh_->createAdvert(
+      this->mesh_->self_id,
+      reinterpret_cast<const uint8_t *>(name.data()),
+      name.size());
   if (pkt == nullptr) {
     ESP_LOGW(TAG, "self-advert: packet allocation failed");
     return;
