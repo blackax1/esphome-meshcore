@@ -368,7 +368,10 @@ void MeshCoreComponent::bump_rtc_from_mesh(uint32_t mesh_timestamp) {
 
 void MeshCoreComponent::send_self_advert_() {
   uint8_t adv_type = this->repeater_ ? ADV_TYPE_REPEATER : ADV_TYPE_CHAT;
-  AdvertDataBuilder builder(adv_type, this->node_name_.c_str());
+
+  AdvertDataBuilder builder = this->gps_valid_
+      ? AdvertDataBuilder(adv_type, this->node_name_.c_str(), this->gps_lat_, this->gps_lng_)
+      : AdvertDataBuilder(adv_type, this->node_name_.c_str());
 
   uint8_t buf[MAX_ADVERT_DATA_SIZE];
   uint8_t len = builder.encodeTo(buf);
