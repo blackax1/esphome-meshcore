@@ -310,6 +310,9 @@ bool MeshCoreComponent::send_text_message(const std::string &channel_name, const
     return false;
   }
   this->mesh_->sendFlood(pkt);
+  // Return packet to the pool — sendFlood copies the payload, it does not
+  // consume the packet object itself.
+  this->packet_mgr_->release(pkt);
   ESP_LOGD(TAG, "send_text_message flooded on '%s': %s", channel->name, text.c_str());
   return true;
 }
@@ -435,6 +438,9 @@ void MeshCoreComponent::send_self_advert_() {
     return;
   }
   this->mesh_->sendFlood(pkt);
+  // Return packet to the pool — sendFlood copies the payload, it does not
+  // consume the packet object itself.
+  this->packet_mgr_->release(pkt);
   ESP_LOGCONFIG(TAG, "Sent self-advert as '%s' (%u bytes)", name.c_str(), (unsigned) idx);
 }
 
