@@ -1,7 +1,14 @@
 #pragma once
 
 #include "esphome/core/automation.h"
-#include "meshcore.h"
+#include "esphome/core/hal.h"
+
+// Forward declaration — avoids circular include with meshcore.h
+namespace esphome {
+namespace meshcore {
+class MeshCoreComponent;
+}
+}
 
 namespace esphome {
 namespace meshcore {
