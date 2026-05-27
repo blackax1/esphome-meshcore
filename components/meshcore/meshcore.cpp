@@ -367,111 +367,24 @@ void MeshCoreComponent::bump_rtc_from_mesh(uint32_t mesh_timestamp) {
 }
 
 void MeshCoreComponent::send_self_advert_() {
-  // Build a self-advert matching upstream AdvertDataHelpers format so
-  // other nodes can correctly parse our details and recognize us.
-  //
-  // IMPORTANT: createAdvert() hard-rejects app_data_len > MAX_ADVERT_DATA_SIZE
-  // (32 bytes). We must stay within that budget. Fields are added in
-  // priority order; optional ones are skipped if they would overflow.
-  const auto &name = this->node_name_;
-  const size_t name_len = std::min(name.size(), size_t(28));  // hard cap so header always fits
+  uint8_t adv_type = this->repeater_ ? ADV_TYPE_REPEATER : ADV_TYPE_CHAT;
+  AdvertDataBuilder builder(adv_type, this->node_name_.c_str());
 
-  constexpr uint8_t ADVERT_TYPE_SELF = 0x01;
-  constexpr size_t  ADVERT_BUF_MAX   = MAX_ADVERT_DATA_SIZE;
-  uint8_t buf[ADVERT_BUF_MAX];
-  size_t idx = 0;
+  uint8_t buf[MAX_ADVERT_DATA_SIZE];
+  uint8_t len = builder.encodeTo(buf);
 
-  // Helper: append a sub-payload only if it fits within the budget.
-  // Returns true if appended, false if skipped.
-  auto try_append = [&](const uint8_t *data, size_t len) -> bool {
-    if (idx + len > ADVERT_BUF_MAX) return false;
-    memcpy(&buf[idx], data, len);
-    idx += len;
-    return true;
-  };
-
-  // --- mandatory: type + name (always fits; name is capped above) ---
-  buf[idx++] = ADVERT_TYPE_SELF;
-  buf[idx++] = static_cast<uint8_t>(name_len);
-  memcpy(&buf[idx], name.data(), name_len);
-  idx += name_len;
-
-  // --- path_hash_mode sub-payload (type=0x14, 3 bytes) ---
-  {
-    uint8_t phm[3] = {0x14, 0x01, static_cast<uint8_t>(this->path_hash_mode_)};
-    try_append(phm, sizeof(phm));
-  }
-
-  // --- battery sub-payload (type=0x03, 4 bytes) ---
-  {
-    const uint16_t mv = this->board_.getBattMilliVolts();
-    if (mv != 0) {
-      uint8_t batt[4] = {0x03, 0x02,
-                         static_cast<uint8_t>(mv & 0xFF),
-                         static_cast<uint8_t>((mv >> 8) & 0xFF)};
-      try_append(batt, sizeof(batt));
-    }
-  }
-
-  // --- location sub-payload (type=0x02, 10 bytes) ---
-  if (this->gps_valid_) {
-    uint32_t lat_fixed = static_cast<uint32_t>(this->gps_lat_ * 1000000.0f);
-    uint32_t lng_fixed = static_cast<uint32_t>(this->gps_lng_ * 1000000.0f);
-    uint8_t loc[10];
-    loc[0] = 0x02; loc[1] = 0x08;
-    memcpy(&loc[2], &lat_fixed, 4);
-    memcpy(&loc[6], &lng_fixed, 4);
-    try_append(loc, sizeof(loc));
-  }
-
-  // --- firmware_version sub-payload (type=0x13, variable) ---
-  if (!this->firmware_version_.empty()) {
-    const uint8_t fvl = static_cast<uint8_t>(
-        std::min(this->firmware_version_.size(), size_t(ADVERT_BUF_MAX - idx > 2 ? ADVERT_BUF_MAX - idx - 2 : 0)));
-    if (fvl > 0) {
-      uint8_t hdr[2] = {0x13, fvl};
-      if (try_append(hdr, 2)) {
-        try_append(reinterpret_cast<const uint8_t *>(this->firmware_version_.data()), fvl);
-      }
-    }
-  }
-
-  // --- owner.info sub-payloads (type=0x10/0x11/0x12, variable) ---
-  auto try_append_owner = [&](uint8_t type, const std::string &val) {
-    if (val.empty()) return;
-    const uint8_t plen = static_cast<uint8_t>(
-        std::min(val.size(), size_t(ADVERT_BUF_MAX - idx > 2 ? ADVERT_BUF_MAX - idx - 2 : 0)));
-    if (plen == 0) return;
-    uint8_t hdr[2] = {type, plen};
-    if (try_append(hdr, 2)) {
-      try_append(reinterpret_cast<const uint8_t *>(val.data()), plen);
-    }
-  };
-  try_append_owner(0x10, this->owner_name_);
-  try_append_owner(0x11, this->owner_serial_);
-  try_append_owner(0x12, this->owner_model_);
-
-  mesh::Packet *pkt = this->mesh_->createAdvert(
-      this->mesh_->self_id,
-      buf,
-      idx);
+  mesh::Packet *pkt = this->mesh_->createAdvert(this->mesh_->self_id, buf, len);
   if (pkt == nullptr) {
-    // createAdvert() returns NULL if app_data_len > MAX_ADVERT_DATA_SIZE (32)
-    // OR if the packet pool is exhausted. Log both so it's diagnosable.
     this->advert_retry_after_ms_ = millis() + 5000U;
-    ESP_LOGW(TAG, "self-advert: createAdvert failed (payload=%u bytes, pool free=%d), will retry in 5s",
-             (unsigned) idx, this->packet_mgr_->getFreeCount());
+    ESP_LOGW(TAG, "self-advert: createAdvert failed (pool free=%d), will retry in 5s",
+             this->packet_mgr_->getFreeCount());
     return;
   }
   this->mesh_->sendFlood(pkt);
-  // sendFlood copies the payload internally, so the packet can be freed.
   this->packet_mgr_->free(pkt);
-  // Mark the time only after a successful send so a failed attempt
-  // causes a retry on the next loop() tick rather than waiting a full
-  // advert_interval.
   this->last_advert_ms_ = millis();
-  this->advert_retry_after_ms_ = 0;  // clear any pending backoff
-  ESP_LOGCONFIG(TAG, "Sent self-advert as '%s' (%u bytes)", name.c_str(), (unsigned) idx);
+  this->advert_retry_after_ms_ = 0;
+  ESP_LOGD(TAG, "self-advert sent: '%s' type=%d (%u bytes)", this->node_name_.c_str(), adv_type, (unsigned) len);
 }
 
 bool MeshCoreComponent::load_or_create_identity_() {
@@ -520,15 +433,13 @@ bool MeshCoreComponent::load_or_create_identity_() {
 
 void EsphomeMesh::onAdvertRecv(mesh::Packet *packet, const mesh::Identity &id, uint32_t timestamp,
                                const uint8_t *app_data, size_t app_data_len) {
-  // app_data here is the raw advert payload (typically a node name +
-  // optional location). We log it but don't push to the message
-  // text_sensor: real chat traffic comes via onGroupDataRecv.
-  std::string label(reinterpret_cast<const char *>(app_data), app_data_len);
-  ESP_LOGD(TAG, "advert from %02x%02x%02x%02x: '%s'",
-           id.pub_key[0], id.pub_key[1], id.pub_key[2], id.pub_key[3], label.c_str());
-  // Bootstrap our RTC off whichever advert in the mesh has the newest
-  // timestamp. Off-grid nodes converge their clock this way without
-  // needing WiFi / NTP / GPS.
+  // Parse using the upstream AdvertDataParser so we display the name cleanly.
+  AdvertDataParser parser(app_data, static_cast<uint8_t>(app_data_len));
+  const char *name = (parser.isValid() && parser.hasName()) ? parser.getName() : "<unknown>";
+  ESP_LOGD(TAG, "advert from %02x%02x%02x%02x: '%s' type=%d%s",
+           id.pub_key[0], id.pub_key[1], id.pub_key[2], id.pub_key[3],
+           name, parser.getType(),
+           parser.hasLatLon() ? " (has GPS)" : "");
   this->owner_->bump_rtc_from_mesh(timestamp);
 }
 
