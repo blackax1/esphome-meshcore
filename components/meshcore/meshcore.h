@@ -135,12 +135,17 @@ class MeshCoreComponent : public Component {
   void set_node_name(const std::string &name) { this->node_name_ = name; }
   void set_static_identity(const std::string &hex) { this->static_identity_hex_ = hex; }
   void set_repeater(bool repeater) { this->repeater_ = repeater; }
-  void set_gps_location(float latitude, float longitude) {
-    this->gps_lat_ = latitude;
-    this->gps_lng_ = longitude;
-    this->gps_valid_ = !(std::isnan(latitude) || std::isnan(longitude));
-  }
-  bool is_repeater() const { return this->repeater_; }
+   void set_gps_location(float latitude, float longitude) {
+     this->gps_lat_ = latitude;
+     this->gps_lng_ = longitude;
+     this->gps_valid_ = !(std::isnan(latitude) || std::isnan(longitude));
+   }
+   void set_firmware_version(const std::string &version) { this->firmware_version_ = version; }
+   void set_path_hash_mode(int mode) { this->path_hash_mode_ = mode; }
+   void set_owner_name(const std::string &name) { this->owner_name_ = name; }
+   void set_owner_serial(const std::string &serial) { this->owner_serial_ = serial; }
+   void set_owner_model(const std::string &model) { this->owner_model_ = model; }
+   bool is_repeater() const { return this->repeater_; }
    /// Period in seconds between automatic self-adverts in repeater mode.
    /// 0 means advert only at boot. Companion role ignores this.
    void set_advert_interval(uint32_t seconds) { this->advert_interval_sec_ = seconds; }
@@ -237,11 +242,21 @@ class MeshCoreComponent : public Component {
   // to MeshCore's hard-coded May 2024 baseline.
   ESPPreferenceObject mesh_time_pref_;
 
-  // GPS location for self-adverts. NaN means no GPS.
-  float gps_lat_{std::nanf("")};
-  float gps_lng_{std::nanf("")};
-  bool gps_valid_{false};
-};
+   // GPS location for self-adverts. NaN means no GPS.
+   float gps_lat_{std::nanf("")};
+   float gps_lng_{std::nanf("")};
+   bool gps_valid_{false};
+
+   // firmware_version and path_hash_mode. Defaults are applied during
+   // setup() if the YAML didn't provide them.
+   std::string firmware_version_{};
+   int path_hash_mode_{2};  // mesh::PathHashMode::PATH_HASH_MODE_HMAC
+
+   // owner.info
+   std::string owner_name_{};
+   std::string owner_serial_{};
+   std::string owner_model_{};
+ };
 
 }  // namespace meshcore
 }  // namespace esphome

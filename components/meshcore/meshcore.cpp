@@ -365,28 +365,60 @@ void MeshCoreComponent::send_self_advert_() {
   // AdvertData header is [type(1) | name_len(1) | name...] with
   // optional sub-payloads appended. Base type for a self-advert.
   constexpr uint8_t ADVERT_TYPE_SELF = 0x01;
-  uint8_t buf[1 + 1 + 64 + 32];  // type + len + name + spare for lat/lng/battery
+  // Expanded buffer: type + len + name + GPS + battery + fw_version
+  // + path_hash_mode + owner.info fields.
+  constexpr size_t ADVERT_BUF_MAX = 1 + 1 + 64 + 8 + 2 + 64 + 1 + 32 + 32;
+  uint8_t buf[ADVERT_BUF_MAX];
   size_t idx = 0;
   buf[idx++] = ADVERT_TYPE_SELF;
   buf[idx++] = static_cast<uint8_t>(name_len);
   memcpy(&buf[idx], name.data(), name_len);
   idx += name_len;
 
-  // Append location sub-payload if available (type=2, len=8, [lat4 | lng4]).
-  if (this->has_gps_) {
-    buf[idx++] = 0x02;  // location sub-payload type
-    buf[idx++] = 0x08;  // lat/lng = 8 bytes
-    uint32_t lat_fixed = static_cast<uint32_t>(this->gps_latitude_ * 1000000.0f);
-    uint32_t lng_fixed = static_cast<uint32_t>(this->gps_longitude_ * 1000000.0f);
+  // --- owner.info sub-payloads (type=0x10 / 0x11 / 0x12) ---
+  auto append_owner = [&](uint8_t type, const std::string &val) {
+    if (val.empty()) return;
+    const uint8_t plen = static_cast<uint8_t>(
+        std::min(val.size(), size_t(255)));
+    buf[idx++] = type;
+    buf[idx++] = plen;
+    memcpy(&buf[idx], val.data(), plen);
+    idx += plen;
+  };
+  append_owner(0x10, this->owner_name_);
+  append_owner(0x11, this->owner_serial_);
+  append_owner(0x12, this->owner_model_);
+
+  // --- firmware_version sub-payload (type=0x13) ---
+  if (!this->firmware_version_.empty()) {
+    const uint8_t fvl = static_cast<uint8_t>(
+        std::min(this->firmware_version_.size(), size_t(255)));
+    buf[idx++] = 0x13;
+    buf[idx++] = fvl;
+    memcpy(&buf[idx], this->firmware_version_.data(), fvl);
+    idx += fvl;
+  }
+
+  // --- path_hash_mode sub-payload (type=0x14, 1 byte) ---
+  buf[idx++] = 0x14;
+  buf[idx++] = 0x01;
+  buf[idx++] = static_cast<uint8_t>(this->path_hash_mode_);
+
+  // --- location sub-payload (type=0x02) ---
+  if (this->gps_valid_) {
+    buf[idx++] = 0x02;
+    buf[idx++] = 0x08;
+    uint32_t lat_fixed = static_cast<uint32_t>(this->gps_lat_ * 1000000.0f);
+    uint32_t lng_fixed = static_cast<uint32_t>(this->gps_lng_ * 1000000.0f);
     memcpy(&buf[idx], &lat_fixed, 4); idx += 4;
     memcpy(&buf[idx], &lng_fixed, 4); idx += 4;
   }
 
-  // Append battery sub-payload if available (type=3, len=2, [mv_lo | mv_hi]).
-  if (this->battery_pin_ != RADIOLIB_NC) {
+  // --- battery sub-payload (type=0x03) ---
+  {
     const uint16_t mv = this->board_.getBattMilliVolts();
     if (mv != 0) {
-      buf[idx++] = 0x03;  // battery sub-payload type
+      buf[idx++] = 0x03;
       buf[idx++] = 0x02;
       buf[idx++] = static_cast<uint8_t>(mv & 0xFF);
       buf[idx++] = static_cast<uint8_t>((mv >> 8) & 0xFF);

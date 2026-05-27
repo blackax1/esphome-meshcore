@@ -58,18 +58,19 @@ CONF_CODING_RATE = "coding_rate"
 CONF_TX_POWER = "tx_power"
 CONF_NODE_NAME = "node_name"
 CONF_BATTERY_PIN = "battery_pin"
-CONF_FIRMWARE_VERSION = "firmware_version"
-CONF_OWNER_INFO = "owner_info"
 CONF_CHANNELS = "channels"
 CONF_CHANNEL = "channel"
 CONF_KEY = "key"
 CONF_PRIVATE_KEY = "private_key"
 CONF_GPS_LATITUDE = "gps_latitude"
 CONF_GPS_LONGITUDE = "gps_longitude"
-CONF_OWNER_NAME = "owner_name"
-CONF_OWNER_SERIAL = "owner_serial"
-CONF_OWNER_MODEL = "owner_model"
-CONF_FIRMWARE_VERSION_STRING = "firmware_version"
+CONF_FIRMWARE_VERSION = "firmware_version"
+CONF_PATH_HASH_MODE = "path.hash.mode"
+
+CONF_OWNER_INFO = "owner.info"
+CONF_OWNER_NAME = "name"
+CONF_OWNER_SERIAL = "serial"
+CONF_OWNER_MODEL = "model"
 
 
 def _validate_channel_key(value):
@@ -169,6 +170,15 @@ CHANNEL_SCHEMA = cv.Schema(
         # bytes. Hex inputs are normalised to base64 here so the C++
         # side can stay base64-only.
         cv.Required(CONF_KEY): _validate_channel_key,
+    }
+)
+
+# Nested owner.info schema.
+OWNER_INFO_SCHEMA = cv.Schema(
+    {
+        cv.Optional(CONF_OWNER_NAME): cv.string_strict,
+        cv.Optional(CONF_OWNER_SERIAL): cv.string_strict,
+        cv.Optional(CONF_OWNER_MODEL): cv.string_strict,
     }
 )
 
@@ -281,10 +291,9 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_CHANNELS, default=[]): cv.ensure_list(CHANNEL_SCHEMA),
             cv.Optional(CONF_GPS_LATITUDE): cv.float_range(min=-90, max=90),
             cv.Optional(CONF_GPS_LONGITUDE): cv.float_range(min=-180, max=180),
-            cv.Optional(CONF_FIRMWARE_VERSION_STRING): cv.string_strict,
-            cv.Optional(CONF_OWNER_NAME): cv.string_strict,
-            cv.Optional(CONF_OWNER_SERIAL): cv.string_strict,
-            cv.Optional(CONF_OWNER_MODEL): cv.string_strict,
+            cv.Optional(CONF_FIRMWARE_VERSION): cv.string_strict,
+            cv.Optional(CONF_PATH_HASH_MODE): cv.int_range(min=2, max=4),
+            cv.Optional(CONF_OWNER_INFO): OWNER_INFO_SCHEMA,
         }
     ).extend(cv.COMPONENT_SCHEMA),
     _validate_framework,
@@ -308,6 +317,21 @@ async def to_code(config):
 
     if CONF_GPS_LATITUDE in config and CONF_GPS_LONGITUDE in config:
         cg.add(var.set_gps_location(config[CONF_GPS_LATITUDE], config[CONF_GPS_LONGITUDE]))
+
+    if CONF_FIRMWARE_VERSION in config:
+        cg.add(var.set_firmware_version(config[CONF_FIRMWARE_VERSION]))
+
+    if CONF_PATH_HASH_MODE in config:
+        cg.add(var.set_path_hash_mode(config[CONF_PATH_HASH_MODE]))
+
+    if CONF_OWNER_INFO in config:
+        owner = config[CONF_OWNER_INFO]
+        if CONF_OWNER_NAME in owner:
+            cg.add(var.set_owner_name(owner[CONF_OWNER_NAME]))
+        if CONF_OWNER_SERIAL in owner:
+            cg.add(var.set_owner_serial(owner[CONF_OWNER_SERIAL]))
+        if CONF_OWNER_MODEL in owner:
+            cg.add(var.set_owner_model(owner[CONF_OWNER_MODEL]))
 
     # Translate YAML config into the macros MeshCore's CustomSX126x /
     # CustomSX1276 helpers expect. Doing this at the build-flag level
@@ -509,4 +533,3 @@ automation.register_action(
     MESHCORE_SEND_TEXT_SCHEMA,
     synchronous=True,
 )(_send_text_action_to_code)
-
