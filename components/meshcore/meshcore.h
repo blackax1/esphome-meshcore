@@ -176,6 +176,9 @@ class MeshCoreComponent : public Component {
    // duty-cycle-conscious cadence. Companion role ignores this.
    uint32_t advert_interval_sec_{1800};
    uint32_t last_advert_ms_{0};
+   // After a failed advert (pool exhausted), don't retry until this
+   // timestamp. Prevents log spam when the pool is temporarily full.
+   uint32_t advert_retry_after_ms_{0};
   // Optional hex-encoded static identity from YAML. When non-empty,
   // wins over whatever's cached in NVS.
   std::string static_identity_hex_;

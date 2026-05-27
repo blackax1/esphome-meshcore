@@ -15,8 +15,8 @@ static const char *const TAG = "meshcore";
 // Pool of packet buffers shared by the mesh stack.  Increased from the
 // default 16 to accommodate higher traffic loads (periodic self-adverts,
 // table updates, concurrent group messages).  Adjust if RAM is constrained.
-// Each mesh::Packet is ~256 bytes; 64 slots costs ~16 KB of heap.
-static constexpr int PACKET_POOL_SIZE = 64;
+// Each mesh::Packet is ~256 bytes; 96 slots costs ~24 KB of heap.
+static constexpr int PACKET_POOL_SIZE = 96;
 
 // Max text body for a group message, matching BaseChatMesh's MAX_TEXT_LEN
 // (10 * CIPHER_BLOCK_SIZE = 160). Defined locally so we don't have to
@@ -203,9 +203,12 @@ void MeshCoreComponent::loop() {
   // do can discover us without waiting for happenstance traffic.
   // last_advert_ms_ is only advanced on a *successful* send so that a
   // transient packet-pool exhaustion (pool full during a traffic burst)
-  // causes a short retry rather than silently skipping the whole interval.
+  // causes a retry rather than silently skipping the whole interval.
+  // advert_retry_after_ms_ adds a short backoff so a failed attempt
+  // doesn't spam the log on every loop() tick.
   if (this->repeater_ && this->advert_interval_sec_ > 0 &&
-      now - this->last_advert_ms_ > this->advert_interval_sec_ * 1000U) {
+      now - this->last_advert_ms_ > this->advert_interval_sec_ * 1000U &&
+      now >= this->advert_retry_after_ms_) {
     this->send_self_advert_();
   }
 }
@@ -366,81 +369,98 @@ void MeshCoreComponent::bump_rtc_from_mesh(uint32_t mesh_timestamp) {
 void MeshCoreComponent::send_self_advert_() {
   // Build a self-advert matching upstream AdvertDataHelpers format so
   // other nodes can correctly parse our details and recognize us.
+  //
+  // IMPORTANT: createAdvert() hard-rejects app_data_len > MAX_ADVERT_DATA_SIZE
+  // (32 bytes). We must stay within that budget. Fields are added in
+  // priority order; optional ones are skipped if they would overflow.
   const auto &name = this->node_name_;
-  const size_t name_len = name.size();
+  const size_t name_len = std::min(name.size(), size_t(28));  // hard cap so header always fits
 
-  // AdvertData header is [type(1) | name_len(1) | name...] with
-  // optional sub-payloads appended. Base type for a self-advert.
   constexpr uint8_t ADVERT_TYPE_SELF = 0x01;
-  // Expanded buffer: type + len + name + GPS + battery + fw_version
-  // + path_hash_mode + owner.info fields.
-  constexpr size_t ADVERT_BUF_MAX = 1 + 1 + 64 + 8 + 2 + 64 + 1 + 32 + 32;
+  constexpr size_t  ADVERT_BUF_MAX   = MAX_ADVERT_DATA_SIZE;
   uint8_t buf[ADVERT_BUF_MAX];
   size_t idx = 0;
+
+  // Helper: append a sub-payload only if it fits within the budget.
+  // Returns true if appended, false if skipped.
+  auto try_append = [&](const uint8_t *data, size_t len) -> bool {
+    if (idx + len > ADVERT_BUF_MAX) return false;
+    memcpy(&buf[idx], data, len);
+    idx += len;
+    return true;
+  };
+
+  // --- mandatory: type + name (always fits; name is capped above) ---
   buf[idx++] = ADVERT_TYPE_SELF;
   buf[idx++] = static_cast<uint8_t>(name_len);
   memcpy(&buf[idx], name.data(), name_len);
   idx += name_len;
 
-  // --- owner.info sub-payloads (type=0x10 / 0x11 / 0x12) ---
-  auto append_owner = [&](uint8_t type, const std::string &val) {
-    if (val.empty()) return;
-    const uint8_t plen = static_cast<uint8_t>(
-        std::min(val.size(), size_t(255)));
-    buf[idx++] = type;
-    buf[idx++] = plen;
-    memcpy(&buf[idx], val.data(), plen);
-    idx += plen;
-  };
-  append_owner(0x10, this->owner_name_);
-  append_owner(0x11, this->owner_serial_);
-  append_owner(0x12, this->owner_model_);
-
-  // --- firmware_version sub-payload (type=0x13) ---
-  if (!this->firmware_version_.empty()) {
-    const uint8_t fvl = static_cast<uint8_t>(
-        std::min(this->firmware_version_.size(), size_t(255)));
-    buf[idx++] = 0x13;
-    buf[idx++] = fvl;
-    memcpy(&buf[idx], this->firmware_version_.data(), fvl);
-    idx += fvl;
+  // --- path_hash_mode sub-payload (type=0x14, 3 bytes) ---
+  {
+    uint8_t phm[3] = {0x14, 0x01, static_cast<uint8_t>(this->path_hash_mode_)};
+    try_append(phm, sizeof(phm));
   }
 
-  // --- path_hash_mode sub-payload (type=0x14, 1 byte) ---
-  buf[idx++] = 0x14;
-  buf[idx++] = 0x01;
-  buf[idx++] = static_cast<uint8_t>(this->path_hash_mode_);
-
-  // --- location sub-payload (type=0x02) ---
-  if (this->gps_valid_) {
-    buf[idx++] = 0x02;
-    buf[idx++] = 0x08;
-    uint32_t lat_fixed = static_cast<uint32_t>(this->gps_lat_ * 1000000.0f);
-    uint32_t lng_fixed = static_cast<uint32_t>(this->gps_lng_ * 1000000.0f);
-    memcpy(&buf[idx], &lat_fixed, 4); idx += 4;
-    memcpy(&buf[idx], &lng_fixed, 4); idx += 4;
-  }
-
-  // --- battery sub-payload (type=0x03) ---
+  // --- battery sub-payload (type=0x03, 4 bytes) ---
   {
     const uint16_t mv = this->board_.getBattMilliVolts();
     if (mv != 0) {
-      buf[idx++] = 0x03;
-      buf[idx++] = 0x02;
-      buf[idx++] = static_cast<uint8_t>(mv & 0xFF);
-      buf[idx++] = static_cast<uint8_t>((mv >> 8) & 0xFF);
+      uint8_t batt[4] = {0x03, 0x02,
+                         static_cast<uint8_t>(mv & 0xFF),
+                         static_cast<uint8_t>((mv >> 8) & 0xFF)};
+      try_append(batt, sizeof(batt));
     }
   }
+
+  // --- location sub-payload (type=0x02, 10 bytes) ---
+  if (this->gps_valid_) {
+    uint32_t lat_fixed = static_cast<uint32_t>(this->gps_lat_ * 1000000.0f);
+    uint32_t lng_fixed = static_cast<uint32_t>(this->gps_lng_ * 1000000.0f);
+    uint8_t loc[10];
+    loc[0] = 0x02; loc[1] = 0x08;
+    memcpy(&loc[2], &lat_fixed, 4);
+    memcpy(&loc[6], &lng_fixed, 4);
+    try_append(loc, sizeof(loc));
+  }
+
+  // --- firmware_version sub-payload (type=0x13, variable) ---
+  if (!this->firmware_version_.empty()) {
+    const uint8_t fvl = static_cast<uint8_t>(
+        std::min(this->firmware_version_.size(), size_t(ADVERT_BUF_MAX - idx > 2 ? ADVERT_BUF_MAX - idx - 2 : 0)));
+    if (fvl > 0) {
+      uint8_t hdr[2] = {0x13, fvl};
+      if (try_append(hdr, 2)) {
+        try_append(reinterpret_cast<const uint8_t *>(this->firmware_version_.data()), fvl);
+      }
+    }
+  }
+
+  // --- owner.info sub-payloads (type=0x10/0x11/0x12, variable) ---
+  auto try_append_owner = [&](uint8_t type, const std::string &val) {
+    if (val.empty()) return;
+    const uint8_t plen = static_cast<uint8_t>(
+        std::min(val.size(), size_t(ADVERT_BUF_MAX - idx > 2 ? ADVERT_BUF_MAX - idx - 2 : 0)));
+    if (plen == 0) return;
+    uint8_t hdr[2] = {type, plen};
+    if (try_append(hdr, 2)) {
+      try_append(reinterpret_cast<const uint8_t *>(val.data()), plen);
+    }
+  };
+  try_append_owner(0x10, this->owner_name_);
+  try_append_owner(0x11, this->owner_serial_);
+  try_append_owner(0x12, this->owner_model_);
 
   mesh::Packet *pkt = this->mesh_->createAdvert(
       this->mesh_->self_id,
       buf,
       idx);
   if (pkt == nullptr) {
-    // Packet pool temporarily exhausted (traffic burst). The periodic
-    // scheduler in loop() will retry after a short backoff because
-    // last_advert_ms_ is only updated on success.
-    ESP_LOGW(TAG, "self-advert: packet allocation failed, will retry");
+    // createAdvert() returns NULL if app_data_len > MAX_ADVERT_DATA_SIZE (32)
+    // OR if the packet pool is exhausted. Log both so it's diagnosable.
+    this->advert_retry_after_ms_ = millis() + 5000U;
+    ESP_LOGW(TAG, "self-advert: createAdvert failed (payload=%u bytes, pool free=%d), will retry in 5s",
+             (unsigned) idx, this->packet_mgr_->getFreeCount());
     return;
   }
   this->mesh_->sendFlood(pkt);
@@ -450,6 +470,7 @@ void MeshCoreComponent::send_self_advert_() {
   // causes a retry on the next loop() tick rather than waiting a full
   // advert_interval.
   this->last_advert_ms_ = millis();
+  this->advert_retry_after_ms_ = 0;  // clear any pending backoff
   ESP_LOGCONFIG(TAG, "Sent self-advert as '%s' (%u bytes)", name.c_str(), (unsigned) idx);
 }
 
