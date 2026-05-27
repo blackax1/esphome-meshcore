@@ -12,9 +12,10 @@ namespace meshcore {
 
 static const char *const TAG = "meshcore";
 
-// Mirrors the upstream simple_repeater example. Bump if rx queues fill
-// up under heavy traffic.
-static constexpr int PACKET_POOL_SIZE = 16;
+// Pool of packet buffers shared by the mesh stack.  Increased from the
+// default 16 to accommodate higher traffic loads (periodic self-adverts,
+// table updates, concurrent group messages).  Adjust if RAM is constrained.
+static constexpr int PACKET_POOL_SIZE = 48;
 
 // Max text body for a group message, matching BaseChatMesh's MAX_TEXT_LEN
 // (10 * CIPHER_BLOCK_SIZE = 160). Defined locally so we don't have to
