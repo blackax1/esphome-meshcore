@@ -15,7 +15,8 @@ static const char *const TAG = "meshcore";
 // Pool of packet buffers shared by the mesh stack.  Increased from the
 // default 16 to accommodate higher traffic loads (periodic self-adverts,
 // table updates, concurrent group messages).  Adjust if RAM is constrained.
-static constexpr int PACKET_POOL_SIZE = 48;
+// Each mesh::Packet is ~256 bytes; 64 slots costs ~16 KB of heap.
+static constexpr int PACKET_POOL_SIZE = 64;
 
 // Max text body for a group message, matching BaseChatMesh's MAX_TEXT_LEN
 // (10 * CIPHER_BLOCK_SIZE = 160). Defined locally so we don't have to
@@ -174,9 +175,10 @@ void MeshCoreComponent::setup() {
   // them and route through. Companion nodes stay quiet by default —
   // they don't relay traffic, so polluting the air with adverts buys
   // them nothing and just adds congestion.
+  // Note: send_self_advert_() sets last_advert_ms_ on success, so a
+  // failed boot advert will be retried by loop() automatically.
   if (this->repeater_) {
     this->send_self_advert_();
-    this->last_advert_ms_ = millis();
   }
 
   ESP_LOGCONFIG(TAG, "MeshCore ready, pubkey prefix = %02x%02x%02x%02x",
@@ -199,9 +201,11 @@ void MeshCoreComponent::loop() {
 
   // Periodic self-advert in repeater mode so nodes that boot after we
   // do can discover us without waiting for happenstance traffic.
+  // last_advert_ms_ is only advanced on a *successful* send so that a
+  // transient packet-pool exhaustion (pool full during a traffic burst)
+  // causes a short retry rather than silently skipping the whole interval.
   if (this->repeater_ && this->advert_interval_sec_ > 0 &&
       now - this->last_advert_ms_ > this->advert_interval_sec_ * 1000U) {
-    this->last_advert_ms_ = now;
     this->send_self_advert_();
   }
 }
@@ -433,12 +437,19 @@ void MeshCoreComponent::send_self_advert_() {
       buf,
       idx);
   if (pkt == nullptr) {
-    ESP_LOGW(TAG, "self-advert: packet allocation failed");
+    // Packet pool temporarily exhausted (traffic burst). The periodic
+    // scheduler in loop() will retry after a short backoff because
+    // last_advert_ms_ is only updated on success.
+    ESP_LOGW(TAG, "self-advert: packet allocation failed, will retry");
     return;
   }
   this->mesh_->sendFlood(pkt);
   // sendFlood copies the payload internally, so the packet can be freed.
   this->packet_mgr_->free(pkt);
+  // Mark the time only after a successful send so a failed attempt
+  // causes a retry on the next loop() tick rather than waiting a full
+  // advert_interval.
+  this->last_advert_ms_ = millis();
   ESP_LOGCONFIG(TAG, "Sent self-advert as '%s' (%u bytes)", name.c_str(), (unsigned) idx);
 }
 
