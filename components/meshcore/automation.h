@@ -32,5 +32,20 @@ template<typename... Ts> class SendTextMessageAction : public Action<Ts...> {
   MeshCoreComponent *parent_;
 };
 
+/// Action to manually trigger a self-advert from YAML (e.g. button press).
+template<typename... Ts> class SendSelfAdvertAction : public Action<Ts...> {
+ public:
+  explicit SendSelfAdvertAction(MeshCoreComponent *parent) : parent_(parent) {}
+
+  void play(Ts... x) override {
+    if (this->parent_ != nullptr) {
+      this->parent_->send_self_advert();
+    }
+  }
+
+ protected:
+  MeshCoreComponent *parent_;
+};
+
 }  // namespace meshcore
 }  // namespace esphome
