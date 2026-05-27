@@ -69,6 +69,10 @@ esphome-meshcore/
      dio1_pin: GPIO14
      reset_pin: GPIO12
      busy_pin: GPIO13
+     firmware_version: "1.0.0"
+     owner.info:
+       name: "John Doe"
+       serial: "SN-2026-0001"
      channels:
        - name: "Public"
          key: "izOH6cXN6mrJ5e26oRXNcg=="
@@ -133,10 +137,78 @@ See [`example.yaml`](./example.yaml) for a complete file.
 | `node_name` | no | `esphome-mesh` | Up to 32 bytes. Becomes both the contact-list label and the chat sender prefix |
 | `role` | no | `companion` | One of `companion` (RX/TX only), `repeater` (also flood-forwards traffic) |
 | `private_key` | no | (auto) | Hex string: 64 bytes (prv only) or 96 bytes (prv+pub). When set, overrides the NVS cache and pins identity across reflashes. Use `!secret` |
+| `firmware_version` | no | — | Firmware version string included in self-advert packets |
+| `owner.info` | no | — | Owner identification info included in self-advert packets; see [Owner info](#owner-info) below |
+| `path.hash.mode` | no | `4` | Path hash length: `4` (full), `3`, or `2` bytes |
 | `battery_pin` | no | — | ADC pin for `mesh::MainBoard::getBattMilliVolts` if your board exposes a battery divider |
 | `gps_latitude` | no | — | Latitude for self-advert packets (used with `gps_longitude`) |
 | `gps_longitude` | no | — | Longitude for self-advert packets (used with `gps_latitude`) |
 | `channels` | no | `[]` | List of `name` + `key` entries; see channel reference below |
+
+### `firmware_version` in self-advert
+
+Set `firmware_version` on the `meshcore:` block to include the firmware
+version in your node's self-advert packet. Other nodes will display the
+version in their node lists.
+
+```yaml
+meshcore:
+  id: mesh_hub
+  radio: sx1262
+  # ... pins ...
+  firmware_version: "1.2.0"
+  channels:
+    - name: "Public"
+      key: "izOH6cXN6mrJ5e26oRXNcg=="
+```
+
+### `owner.info` in self-advert
+
+Set `owner.info` on the `meshcore:` block to include owner identification
+information in your node's self-advert packet. When a node is lost, other
+nodes in the mesh can see the owner details to return it.
+
+```yaml
+meshcore:
+  id: mesh_hub
+  radio: sx1262
+  # ... pins ...
+  owner.info:
+    name: "Jane Doe"
+    serial: "SN-2026-0042"
+    model: "heltec_v3"
+  channels:
+    - name: "Public"
+      key: "izOH6cXN6mrJ5e26oRXNcg=="
+```
+
+| Field | Required? | Notes |
+|---|---|---|
+| `name` | yes | Owner's name |
+| `serial` | no | Device serial number |
+| `model` | no | Device model (e.g., `heltec_v3`, `t-beam`) |
+
+### `path.hash.mode` in self-advert
+
+Set `path.hash.mode` on the `meshcore:` block to control the length of
+the path hash used in self-advert packets. This reduces packet overhead
+by shortening the hash portion of the packet.
+
+```yaml
+meshcore:
+  id: mesh_hub
+  radio: sx1262
+  # ... pins ...
+  path.hash.mode: 2  # Use 2-byte path hash instead of default 4
+  channels:
+    - name: "Public"
+      key: "izOH6cXN6mrJ5e26oRXNcg=="
+```
+
+Valid values:
+- `4` (default): Full 4-byte path hash
+- `3`: 3-byte path hash (saves 1 byte per advert)
+- `2`: 2-byte path hash (saves 2 bytes per advert)
 
 ### `channels:` entries
 
@@ -206,21 +278,23 @@ advert is sent with `lat = 0, lon = 0` which upstream tools treat as
 
 ### `meshcore.send_text_message` action
 
+The `meshcore.send_text_message` action builds and sends a group text
+message to all nodes on a configured channel.
+
 ```yaml
-- meshcore.send_text_message:
-    id: <hub id>
-    channel: "<name>"   # optional; defaults to first configured channel
-    text: "<utf-8>"      # required, templatable
+meshcore.send_text_message:
+  id: mesh_hub
+  channel: "Public"
+  text: "Hello from ESPHome!"
 ```
 
-Wire-compatible with upstream `BaseChatMesh::sendGroupMessage`. Both
-fields are templatable, so you can use `!lambda` to splice in sensor
-state.
+| Field | Required? | Notes |
+|---|---|---|
+| `id` | yes | The meshcore hub id |
+| `channel` | yes | Channel name (must match a configured channel) |
+| `text` | yes | Message text |
 
-The legacy name `meshcore.send_message` is still accepted as a
-deprecated alias.
-
-## Board recipes
+## Board examples
 
 ### Heltec WiFi LoRa 32 V3 (SX1262)
 
