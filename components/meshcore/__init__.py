@@ -39,6 +39,8 @@ MULTI_CONF = False
 meshcore_ns = cg.esphome_ns.namespace("meshcore")
 MeshCoreComponent = meshcore_ns.class_("MeshCoreComponent", cg.Component)
 SendTextMessageAction = meshcore_ns.class_("SendTextMessageAction", automation.Action)
+SendSelfAdvertAction = meshcore_ns.class_("SendSelfAdvertAction", automation.Action)
+
 
 CONF_RADIO = "radio"
 CONF_ROLE = "role"
@@ -56,12 +58,18 @@ CONF_CODING_RATE = "coding_rate"
 CONF_TX_POWER = "tx_power"
 CONF_NODE_NAME = "node_name"
 CONF_BATTERY_PIN = "battery_pin"
+CONF_FIRMWARE_VERSION = "firmware_version"
+CONF_OWNER_INFO = "owner_info"
 CONF_CHANNELS = "channels"
 CONF_CHANNEL = "channel"
 CONF_KEY = "key"
 CONF_PRIVATE_KEY = "private_key"
 CONF_GPS_LATITUDE = "gps_latitude"
 CONF_GPS_LONGITUDE = "gps_longitude"
+CONF_OWNER_NAME = "owner_name"
+CONF_OWNER_SERIAL = "owner_serial"
+CONF_OWNER_MODEL = "owner_model"
+CONF_FIRMWARE_VERSION_STRING = "firmware_version"
 
 
 def _validate_channel_key(value):
@@ -273,6 +281,10 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_CHANNELS, default=[]): cv.ensure_list(CHANNEL_SCHEMA),
             cv.Optional(CONF_GPS_LATITUDE): cv.float_range(min=-90, max=90),
             cv.Optional(CONF_GPS_LONGITUDE): cv.float_range(min=-180, max=180),
+            cv.Optional(CONF_FIRMWARE_VERSION_STRING): cv.string_strict,
+            cv.Optional(CONF_OWNER_NAME): cv.string_strict,
+            cv.Optional(CONF_OWNER_SERIAL): cv.string_strict,
+            cv.Optional(CONF_OWNER_MODEL): cv.string_strict,
         }
     ).extend(cv.COMPONENT_SCHEMA),
     _validate_framework,
@@ -467,6 +479,28 @@ automation.register_action(
     synchronous=True,
 )(_send_text_action_to_code)
 
+# --- meshcore.send_self_advert action ---
+
+SEND_SELF_ADVERT_SCHEMA = cv.Schema(
+    {
+        cv.GenerateID(): cv.use_id(MeshCoreComponent),
+    }
+)
+
+
+async def _send_self_advert_action_to_code(config, action_id, template_arg, args):
+    parent = await cg.get_variable(config[CONF_ID])
+    var = cg.new_Pvariable(action_id, template_arg, parent)
+    return var
+
+
+automation.register_action(
+    "meshcore.send_self_advert",
+    SendSelfAdvertAction,
+    SEND_SELF_ADVERT_SCHEMA,
+    synchronous=True,
+)(_send_self_advert_action_to_code)
+
 # Legacy alias kept for back-compat. Deprecated; will be removed in a
 # future release.
 automation.register_action(
@@ -475,3 +509,4 @@ automation.register_action(
     MESHCORE_SEND_TEXT_SCHEMA,
     synchronous=True,
 )(_send_text_action_to_code)
+

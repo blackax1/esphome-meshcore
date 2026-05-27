@@ -38,6 +38,21 @@ namespace meshcore {
 
 class MeshCoreComponent;
 
+/// Action to manually trigger a self-advert from YAML (e.g. button press).
+class SendSelfAdvertAction : public automation::Action<> {
+ public:
+  void play() {
+    if (this->owner_ != nullptr && this->owner_->mesh_ != nullptr) {
+      this->owner_->send_self_advert();
+    }
+  }
+  void set_parent(MeshCoreComponent *parent) { this->owner_ = parent; }
+
+ protected:
+  MeshCoreComponent *owner_{nullptr};
+};
+
+
 /// MeshCore::Mesh subclass. Surfaces interesting events to the owning
 /// ESPHome component and answers channel-hash lookups from the dispatcher.
 class EsphomeMesh : public mesh::Mesh {
@@ -140,6 +155,10 @@ class MeshCoreComponent : public Component {
   /// Send `text` on the first configured channel. Returns false if the
   /// mesh isn't ready or no channels are configured.
   bool send_text_message(const std::string &text);
+
+  /// Public wrapper called from YAML actions to trigger a manual self-advert.
+  void send_self_advert() { this->send_self_advert_(); }
+
 
   /// Send `text` on the channel matching `channel_name`. Returns false
   /// if the mesh isn't ready, the channel name is not in the configured

@@ -357,19 +357,52 @@ void MeshCoreComponent::bump_rtc_from_mesh(uint32_t mesh_timestamp) {
 }
 
 void MeshCoreComponent::send_self_advert_() {
-  // Build a self-advert containing just the node name, matching
-  // upstream simple_repeater's format: a raw ASCII string payload.
+  // Build a self-advert matching upstream AdvertDataHelpers format so
+  // other nodes can correctly parse our details and recognize us.
   const auto &name = this->node_name_;
+  const size_t name_len = name.size();
+
+  // AdvertData header is [type(1) | name_len(1) | name...] with
+  // optional sub-payloads appended. Base type for a self-advert.
+  constexpr uint8_t ADVERT_TYPE_SELF = 0x01;
+  uint8_t buf[1 + 1 + 64 + 32];  // type + len + name + spare for lat/lng/battery
+  size_t idx = 0;
+  buf[idx++] = ADVERT_TYPE_SELF;
+  buf[idx++] = static_cast<uint8_t>(name_len);
+  memcpy(&buf[idx], name.data(), name_len);
+  idx += name_len;
+
+  // Append location sub-payload if available (type=2, len=8, [lat4 | lng4]).
+  if (this->has_gps_) {
+    buf[idx++] = 0x02;  // location sub-payload type
+    buf[idx++] = 0x08;  // lat/lng = 8 bytes
+    uint32_t lat_fixed = static_cast<uint32_t>(this->gps_latitude_ * 1000000.0f);
+    uint32_t lng_fixed = static_cast<uint32_t>(this->gps_longitude_ * 1000000.0f);
+    memcpy(&buf[idx], &lat_fixed, 4); idx += 4;
+    memcpy(&buf[idx], &lng_fixed, 4); idx += 4;
+  }
+
+  // Append battery sub-payload if available (type=3, len=2, [mv_lo | mv_hi]).
+  if (this->battery_pin_ != RADIOLIB_NC) {
+    const uint16_t mv = this->board_.getBattMilliVolts();
+    if (mv != 0) {
+      buf[idx++] = 0x03;  // battery sub-payload type
+      buf[idx++] = 0x02;
+      buf[idx++] = static_cast<uint8_t>(mv & 0xFF);
+      buf[idx++] = static_cast<uint8_t>((mv >> 8) & 0xFF);
+    }
+  }
+
   mesh::Packet *pkt = this->mesh_->createAdvert(
       this->mesh_->self_id,
-      reinterpret_cast<const uint8_t *>(name.data()),
-      name.size());
+      buf,
+      idx);
   if (pkt == nullptr) {
     ESP_LOGW(TAG, "self-advert: packet allocation failed");
     return;
   }
   this->mesh_->sendFlood(pkt);
-  ESP_LOGCONFIG(TAG, "Sent self-advert as '%s'", name.c_str());
+  ESP_LOGCONFIG(TAG, "Sent self-advert as '%s' (%u bytes)", name.c_str(), (unsigned) idx);
 }
 
 bool MeshCoreComponent::load_or_create_identity_() {
