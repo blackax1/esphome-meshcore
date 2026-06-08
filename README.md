@@ -184,7 +184,7 @@ meshcore:
 
 | Field | Required? | Notes |
 |---|---|---|
-| `name` | yes | Owner's name |
+| `name` | no | Owner's name |
 | `serial` | no | Device serial number |
 | `model` | no | Device model (e.g., `heltec_v3`, `t-beam`) |
 
@@ -276,7 +276,7 @@ Both fields use ESPHome's `cv.latitude` / `cv.longitude` validators
 advert is sent with `lat = 0, lon = 0` which upstream tools treat as
 "unknown location".
 
-### `meshcore.send_text_message` action
+### `meshcore.send_text_message` action (formerly `meshcore.send_message`)
 
 The `meshcore.send_text_message` action builds and sends a group text
 message to all nodes on a configured channel.
@@ -288,11 +288,48 @@ meshcore.send_text_message:
   text: "Hello from ESPHome!"
 ```
 
+If `channel` is omitted, the message is sent on the first configured
+channel (matching the legacy `meshcore.send_message` behaviour):
+
+```yaml
+meshcore.send_text_message:
+  id: mesh_hub
+  text: "Hello on the default channel!"
+```
+
+**Template support:** Both `text` and `channel` support template values
+for dynamic content:
+
+```yaml
+- meshcore.send_text_message:
+    id: mesh_hub
+    channel: !lambda 'return "channel_" + to_string(id(my_number));'
+    text: !lambda 'return sprintf("Hello at %02d:%02d", now().hour, now().minute);'
+```
+
+> **Note:** `meshcore.send_message` is a deprecated alias for
+> `meshcore.send_text_message`. It will be removed in a future release.
+
+### `meshcore.send_self_advert` action
+
+Manually trigger a self-advert broadcast. Useful for button presses or
+periodic triggers to re-advertise your node's presence in the mesh.
+
+```yaml
+button:
+  - platform: template
+    name: "Re-advertise Node"
+    on_press:
+      then:
+        - meshcore.send_self_advert:
+            id: mesh_hub
+```
+
 | Field | Required? | Notes |
 |---|---|---|
 | `id` | yes | The meshcore hub id |
-| `channel` | yes | Channel name (must match a configured channel) |
-| `text` | yes | Message text |
+| `channel` | no | Channel name (must match a configured channel). Omitted = first configured channel |
+| `text` | yes | Message text. Supports templatable values |
 
 ## Board examples
 
