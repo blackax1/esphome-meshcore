@@ -251,6 +251,25 @@ sensor:
 `rssi`/`snr` reflect the most recent received packet. `battery_voltage`
 samples once a minute via `mesh::MainBoard::getBattMilliVolts`.
 
+### `on_message` trigger
+
+You can use the `on_message` trigger on the `meshcore` hub to process incoming messages dynamically. The trigger exposes `channel`, `payload`, `rssi`, and `snr` variables for use in lambdas and conditions.
+
+```yaml
+meshcore:
+  id: mesh_hub
+  # ... other config ...
+  on_message:
+    then:
+      - if:
+          condition:
+            lambda: 'return channel == "Public";'
+          then:
+            - logger.log:
+                format: "Received public message: %s (RSSI: %.1f, SNR: %.1f)"
+                args: ['payload.c_str()', 'rssi', 'snr']
+```
+
 ### GPS coordinates in self-advert
 
 Set `gps_latitude` and `gps_longitude` on the `meshcore:` block to include
