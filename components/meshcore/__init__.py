@@ -436,10 +436,6 @@ async def to_code(config):
         "RADIOLIB_EXCLUDE_FSK4=1",
         "RADIOLIB_EXCLUDE_DIRECT_RECEIVE=1",
     ]
-    if radio in SX126X_RADIOS:
-        radiolib_flags.append("RADIOLIB_EXCLUDE_SX127X=1")
-    elif radio in SX127X_RADIOS:
-        radiolib_flags.append("RADIOLIB_EXCLUDE_SX126X=1")
 
     for flag in radiolib_flags:
         cg.add_build_flag(f"-D{flag}")
