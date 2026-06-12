@@ -303,7 +303,7 @@ bool MeshCoreComponent::send_text_message(const std::string &channel_name, const
   // Wire format expected by other MeshCore nodes on PAYLOAD_TYPE_GRP_TXT:
   //   [timestamp(4) | txt_type(1) | "<sender>: <msg>\0"]
   // See BaseChatMesh::sendGroupMessage in the upstream library.
-  const std::string sender = this->node_name_;
+  const std::string &sender = this->node_name_;
   const size_t prefix_len = sender.size() + 2;  // "name: "
   const size_t text_len = std::min(text.size(), MESHCORE_MAX_TEXT_LEN - prefix_len);
   const size_t total = 5 + prefix_len + text_len;
