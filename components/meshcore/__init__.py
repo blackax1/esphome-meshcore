@@ -367,7 +367,7 @@ async def to_code(config):
         # DIO1), pass RadioLib's "not connected" sentinel so the driver
         # falls back to polling instead of waiting for an interrupt
         # that's never going to fire.
-        "P_LORA_DIO_1": config.get(CONF_DIO1_PIN, "RADIOLIB_NC"),
+        "P_LORA_DIO_1": config.get(CONF_DIO1_PIN, "0xFFFFFFFF"),
         "P_LORA_RESET": config[CONF_RESET_PIN],
         # Radio params consumed by std_init.
         "LORA_FREQ": f"{config[CONF_FREQUENCY]:.4f}f",
