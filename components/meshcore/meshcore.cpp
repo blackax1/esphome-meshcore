@@ -64,22 +64,27 @@ void MeshCoreComponent::setup() {
   // The parameters mirror upstream's CustomSX1262/SX1276::std_init
   // helpers so behaviour is the same on success.
   SPI.begin(P_LORA_SCLK, P_LORA_MISO, P_LORA_MOSI);
+
+  // Match upstream v1.16.0 preamble logic: longer preamble at lower
+  // spreading factors improves packet detection reliability.
+  const int preamble = (LORA_SF <= 8) ? 32 : 16;
+
 #if defined(USE_SX1262)
   float tcxo = SX126X_DIO3_TCXO_VOLTAGE;
   int16_t status = this->radio_->begin(LORA_FREQ, LORA_BW, LORA_SF, LORA_CR,
                                        RADIOLIB_SX126X_SYNC_WORD_PRIVATE,
-                                       LORA_TX_POWER, 16, tcxo);
+                                       LORA_TX_POWER, preamble, tcxo);
   if (status == RADIOLIB_ERR_SPI_CMD_FAILED || status == RADIOLIB_ERR_SPI_CMD_INVALID) {
     // Common on boards without a TCXO: retry with the XOSC (0V) path.
     ESP_LOGW(TAG, "radio init: TCXO failed (status=%d), retrying with XOSC", status);
     status = this->radio_->begin(LORA_FREQ, LORA_BW, LORA_SF, LORA_CR,
                                  RADIOLIB_SX126X_SYNC_WORD_PRIVATE,
-                                 LORA_TX_POWER, 16, 0.0f);
+                                 LORA_TX_POWER, preamble, 0.0f);
   }
 #elif defined(USE_SX1276)
   int16_t status = this->radio_->begin(LORA_FREQ, LORA_BW, LORA_SF, LORA_CR,
                                        RADIOLIB_SX126X_SYNC_WORD_PRIVATE,
-                                       LORA_TX_POWER, 16);
+                                       LORA_TX_POWER, preamble);
 #endif
 
   if (status != RADIOLIB_ERR_NONE) {
@@ -221,6 +226,7 @@ void MeshCoreComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "  Spreading factor: %d", (int) LORA_SF);
   ESP_LOGCONFIG(TAG, "  Coding rate: 4/%d", (int) LORA_CR);
   ESP_LOGCONFIG(TAG, "  TX power: %d dBm", (int) LORA_TX_POWER);
+  ESP_LOGCONFIG(TAG, "  Preamble: %d symbols", (LORA_SF <= 8) ? 32 : 16);
 #if defined(USE_SX1262)
   ESP_LOGCONFIG(TAG, "  Pins: SCLK=%d MISO=%d MOSI=%d NSS=%d DIO1=%d RST=%d BUSY=%d",
                 P_LORA_SCLK, P_LORA_MISO, P_LORA_MOSI, P_LORA_NSS,
