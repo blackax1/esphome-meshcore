@@ -25,6 +25,7 @@ from esphome.const import (
     CONF_TEXT,
     CONF_LATITUDE,
     CONF_LONGITUDE,
+    CONF_TRIGGER_ID,
 )
 
 CODEOWNERS = ["@yourgithub"]
@@ -40,11 +41,13 @@ meshcore_ns = cg.esphome_ns.namespace("meshcore")
 MeshCoreComponent = meshcore_ns.class_("MeshCoreComponent", cg.Component)
 SendTextMessageAction = meshcore_ns.class_("SendTextMessageAction", automation.Action)
 SendSelfAdvertAction = meshcore_ns.class_("SendSelfAdvertAction", automation.Action)
+MeshCoreMessageTrigger = meshcore_ns.class_("MeshCoreMessageTrigger", automation.Trigger.template(cg.std_string, cg.std_string, cg.float_, cg.float_))
 
 
 CONF_RADIO = "radio"
 CONF_ROLE = "role"
 CONF_ADVERT_INTERVAL = "advert_interval"
+CONF_ON_MESSAGE = "on_message"
 CONF_SCLK_PIN = "sclk_pin"
 CONF_DIO0_PIN = "dio0_pin"
 CONF_DIO1_PIN = "dio1_pin"
@@ -294,6 +297,13 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_FIRMWARE_VERSION): cv.string_strict,
             cv.Optional(CONF_PATH_HASH_MODE): cv.int_range(min=2, max=4),
             cv.Optional(CONF_OWNER_INFO): OWNER_INFO_SCHEMA,
+            cv.Optional(CONF_ON_MESSAGE): automation.validate_automation(
+                {
+                    cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(
+                        MeshCoreMessageTrigger
+                    ),
+                }
+            ),
         }
     ).extend(cv.COMPONENT_SCHEMA),
     _validate_framework,
@@ -332,6 +342,14 @@ async def to_code(config):
             cg.add(var.set_owner_serial(owner[CONF_OWNER_SERIAL]))
         if CONF_OWNER_MODEL in owner:
             cg.add(var.set_owner_model(owner[CONF_OWNER_MODEL]))
+
+    for conf in config.get(CONF_ON_MESSAGE, []):
+        trigger = cg.new_Pvariable(conf[CONF_TRIGGER_ID], var)
+        await automation.build_automation(
+            trigger,
+            [(cg.std_string, "channel"), (cg.std_string, "payload"), (cg.float_, "rssi"), (cg.float_, "snr")],
+            conf,
+        )
 
     # Translate YAML config into the macros MeshCore's CustomSX126x /
     # CustomSX1276 helpers expect. Doing this at the build-flag level

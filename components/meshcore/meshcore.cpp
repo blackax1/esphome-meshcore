@@ -329,8 +329,8 @@ bool MeshCoreComponent::send_text_message(const std::string &channel_name, const
   return true;
 }
 
-void MeshCoreComponent::on_message_received(const std::string &payload, float rssi, float snr) {
-  ESP_LOGD(TAG, "rx: '%s' rssi=%.1f snr=%.1f", payload.c_str(), rssi, snr);
+void MeshCoreComponent::on_message_received(const std::string &channel, const std::string &payload, float rssi, float snr) {
+  ESP_LOGD(TAG, "rx [%s]: '%s' rssi=%.1f snr=%.1f", channel.c_str(), payload.c_str(), rssi, snr);
   if (this->last_message_sensor_ != nullptr) {
     this->last_message_sensor_->publish_last_message(payload);
   }
@@ -338,6 +338,7 @@ void MeshCoreComponent::on_message_received(const std::string &payload, float rs
     this->sensors_->publish_rssi(rssi);
     this->sensors_->publish_snr(snr);
   }
+  this->message_callback_.call(channel, payload, rssi, snr);
 }
 
 void MeshCoreComponent::on_battery_sample_() {
@@ -457,7 +458,7 @@ void EsphomeMesh::onAnonDataRecv(mesh::Packet *packet, const uint8_t *secret,
   std::string payload(reinterpret_cast<const char *>(data), len);
   const float rssi = this->_radio->getLastRSSI();
   const float snr = this->_radio->getLastSNR();
-  this->owner_->on_message_received(payload, rssi, snr);
+  this->owner_->on_message_received("Anonymous", payload, rssi, snr);
 }
 
 int EsphomeMesh::searchChannelsByHash(const uint8_t *hash, mesh::GroupChannel channels[],
@@ -526,7 +527,16 @@ void EsphomeMesh::onGroupDataRecv(mesh::Packet *packet, uint8_t type,
   std::string payload(text, strnlen(text, len - 5));
   const float rssi = this->_radio->getLastRSSI();
   const float snr = this->_radio->getLastSNR();
-  this->owner_->on_message_received(payload, rssi, snr);
+
+  std::string channel_name = "Unknown";
+  for (const auto &ch : this->owner_->channels()) {
+    if (memcmp(ch.channel.hash, channel.hash, PATH_HASH_SIZE) == 0) {
+      channel_name = ch.name;
+      break;
+    }
+  }
+
+  this->owner_->on_message_received(channel_name, payload, rssi, snr);
 }
 
 }  // namespace meshcore

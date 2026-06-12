@@ -3,12 +3,7 @@
 #include "esphome/core/automation.h"
 #include "esphome/core/hal.h"
 
-// Forward declaration — avoids circular include with meshcore.h
-namespace esphome {
-namespace meshcore {
-class MeshCoreComponent;
-}
-}
+#include "meshcore.h"
 
 namespace esphome {
 namespace meshcore {
@@ -52,6 +47,17 @@ template<typename... Ts> class SendSelfAdvertAction : public Action<Ts...> {
 
  protected:
   MeshCoreComponent *parent_;
+};
+
+/// Trigger for when a message is received on any channel.
+class MeshCoreMessageTrigger : public Trigger<std::string, std::string, float, float> {
+ public:
+  explicit MeshCoreMessageTrigger(MeshCoreComponent *parent) {
+    parent->add_on_message_callback(
+        [this](const std::string &channel, const std::string &payload, float rssi, float snr) {
+          this->trigger(channel, payload, rssi, snr);
+        });
+  }
 };
 
 }  // namespace meshcore

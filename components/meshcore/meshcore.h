@@ -6,6 +6,7 @@
 
 #include "esphome/core/component.h"
 #include "esphome/core/hal.h"
+#include "esphome/core/helpers.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/text_sensor/text_sensor.h"
 
@@ -161,8 +162,12 @@ class MeshCoreComponent : public Component {
   /// MIN_MESH_TIME_BUMP_SEC newer than the current local time, which
   /// keeps small jitter from constantly re-writing NVS.
   void bump_rtc_from_mesh(uint32_t mesh_timestamp);
-  void on_message_received(const std::string &payload, float rssi, float snr);
+  void on_message_received(const std::string &channel, const std::string &payload, float rssi, float snr);
   const std::vector<ChannelDetails> &channels() const { return this->channels_; }
+
+  void add_on_message_callback(std::function<void(const std::string &, const std::string &, float, float)> &&callback) {
+    this->message_callback_.add(std::move(callback));
+  }
 
  protected:
   bool load_or_create_identity_();
@@ -185,6 +190,7 @@ class MeshCoreComponent : public Component {
 
   MeshCoreTextSensor *last_message_sensor_{nullptr};
   MeshCoreSensorBundle *sensors_{nullptr};
+  CallbackManager<void(const std::string &, const std::string &, float, float)> message_callback_;
 
   // Pending channel configs supplied during codegen. These are decoded
   // into channels_ during setup() once MeshCore globals are available.
