@@ -48,7 +48,7 @@ esphome-meshcore/
    external_components:
      - source:
          type: git
-         url: https://gitea.blackax.net/blackax/esphome-meshcore.git
+         url: hhttps://github.com/blackax1/esphome-meshcore.git
          ref: main
          refresh: 0s        # while iterating; remove once you pin a tag
        components: [meshcore]
