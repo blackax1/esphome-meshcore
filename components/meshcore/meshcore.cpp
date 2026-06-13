@@ -143,9 +143,15 @@ void MeshCoreComponent::setup() {
       fnv1_hash(std::string("meshcore.mesh_time.") + this->node_name_));
   uint32_t saved_ts = 0;
   if (this->mesh_time_pref_.load(&saved_ts) && saved_ts >= MESH_TIME_FLOOR) {
-    this->rtc_clock_.setCurrentTime(saved_ts);
-    this->mesh_time_synced_ = true;
-    ESP_LOGCONFIG(TAG, "RTC restored from NVS: %u", (unsigned) saved_ts);
+    const uint32_t current_ts = this->rtc_clock_.getCurrentTime();
+    if (current_ts < saved_ts) {
+      this->rtc_clock_.setCurrentTime(saved_ts);
+      this->mesh_time_synced_ = true;
+      ESP_LOGCONFIG(TAG, "RTC restored from NVS (was behind): %u", (unsigned) saved_ts);
+    } else {
+      this->mesh_time_synced_ = true;
+      ESP_LOGCONFIG(TAG, "RTC preserved (already ahead of NVS): %u (NVS was %u)", (unsigned) current_ts, (unsigned) saved_ts);
+    }
   }
 
   // Decode any channels declared in YAML now that hashing helpers are
