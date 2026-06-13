@@ -470,6 +470,6 @@ component is strictly required. If your radio fails to init with
 
 ## License
 
-This component is MIT (matching MeshCore upstream). The vendored
+This component is licensed under the AGPLv3. It embeds the upstream MeshCore library, which is MIT licensed. The vendored
 `libs/ed25519` is public domain (see `libs/ed25519/src/license.txt`,
 [orlp/ed25519](https://github.com/orlp/ed25519)).
